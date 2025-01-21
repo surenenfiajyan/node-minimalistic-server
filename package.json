@@ -18,7 +18,7 @@
     "small",
     "server"
   ],
-  "author": "Suren Enfiajyan",
+  "author": "Suren Enfiajyan <surenenfiajyan@gmail.com> (https://github.com/surenenfiajyan)",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/surenenfiajyan/node-minimalistic-server/issues"

@@ -1,6 +1,11 @@
 {
   "name": "minimalistic-server",
   "version": "0.0.1",
+  "engines" : { 
+    "npm" : ">=8.6.0",
+    "node" : ">=22.0.0"
+  },
+  "type": "module",
   "description": "Minimalistic server library hor Node.js. It supports routing, middlewares, parsing common request bodies (JSON, form data, etc).",
   "main": "index.mjs",
   "scripts": {

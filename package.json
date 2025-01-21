@@ -1,0 +1,27 @@
+{
+  "name": "minimalistic-server",
+  "version": "0.0.1",
+  "description": "Minimalistic server library hor Node.js. It supports routing, middlewares, parsing common request bodies (JSON, form data, etc).",
+  "main": "index.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/surenenfiajyan/node-minimalistic-server.git"
+  },
+  "keywords": [
+    "minimalistic",
+    "server",
+    "lite",
+    "server",
+    "small",
+    "server"
+  ],
+  "author": "Suren Enfiajyan",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/surenenfiajyan/node-minimalistic-server/issues"
+  },
+  "homepage": "https://github.com/surenenfiajyan/node-minimalistic-server#readme"
+}

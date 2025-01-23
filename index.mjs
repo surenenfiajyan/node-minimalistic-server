@@ -1208,7 +1208,7 @@ export class FileResponse extends Response {
 			for (let offset = 0; offset < data.size; offset += this.#maxChunkSize) {
 				const size = Math.min(this.#maxChunkSize, data.size - offset);
 				const chunk = await filehandle.read(Buffer.alloc(size), 0, size);
-				yield chunk;
+				yield chunk.buffer;
 				await new Promise(resolve => setTimeout(resolve, 100));
 			}
 		} finally {

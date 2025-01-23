@@ -1159,6 +1159,8 @@ export class FileResponse extends Response {
 
 	#dataPromise = null;
 
+	#maxChunkSize = 16 * 1024 * 1024;
+
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
 		this.#filePath = filePath;
@@ -1190,6 +1192,30 @@ export class FileResponse extends Response {
 		this.#filePath = filePath;
 	}
 
+	async * #getBodyStream() {
+		const data = await this.#retreiveData();
+
+		if (typeof data.body !== 'function') {
+			yield data.body;
+			return;
+		}
+
+		let filehandle;
+
+		try {
+			filehandle = await fs.open(this.#filePath, 'r');
+
+			for (let offset = 0; offset < data.size; offset += this.#maxChunkSize) {
+				const size = Math.min(this.#maxChunkSize, data.size - offset);
+				const chunk = await filehandle.read(Buffer.alloc(size), 0, size);
+				yield chunk;
+				await new Promise(resolve => setTimeout(resolve, 100));
+			}
+		} finally {
+			filehandle?.close();
+		}
+	}
+
 	#retreiveData() {
 		if (!this.#dataPromise) {
 			this.#dataPromise = new Promise(async (resolve) => {
@@ -1197,15 +1223,18 @@ export class FileResponse extends Response {
 
 				try {
 					filehandle = await fs.open(this.#filePath, 'r');
-					const body = await filehandle.readFile();
+					const size = (await filehandle.stat()).size;
+					const body = size > this.#maxChunkSize ? (() => this.#getBodyStream()) : await filehandle.readFile();
 
 					resolve({
 						code: this.#code,
 						headers: this.getMergedWithOtherHeaders({
-							'Content-Type': this.#contentType ?? mimeTypes[this.#filePath.split('.').at(-1).toLowerCase()] ?? 'application/octet-stream'
+							'Content-Type': this.#contentType ?? mimeTypes[this.#filePath.split('.').at(-1).toLowerCase()] ?? 'application/octet-stream',
+							'Content-Length': size,
 						}
 						),
 						body,
+						size,
 					});
 				} catch (e) {
 					console.error(e);
@@ -1335,9 +1364,22 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 		unserve(port);
 
 		const server = http.createServer(async (req, res) => {
-			const [code, headers, body] = await handleRequest(req, routes, staticFileDirectory);
-			res.writeHead(code, headers);
-			res.end(body);
+			try {
+				const [code, headers, body] = await handleRequest(req, routes, staticFileDirectory);
+				res.writeHead(code, headers);
+
+				if (typeof body === 'function') {
+					for await (const chunk of body()) {
+						res.write(chunk);
+					}
+				} else {
+					res.write(body);
+				}
+			} catch (error) {
+				console.error(error);
+			} finally {
+				res.end();
+			}
 		});
 
 		servers.set(port, server);

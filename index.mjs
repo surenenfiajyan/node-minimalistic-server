@@ -1187,8 +1187,10 @@ export class FileResponse extends Response {
 
 		if (requestedFragment) {
 			return {
-				'Content-Range': `bytes ${requestedFragment.offset}-${requestedFragment.offset + requestedFragment.size - 1}/${data.size}`,
 				...data.headers,
+				'Content-Range': `bytes ${requestedFragment.offset}-${requestedFragment.offset + requestedFragment.size - 1}/${data.size}`,
+				'Content-Length': `${requestedFragment.size}`,
+
 			};
 		}
 
@@ -1231,7 +1233,7 @@ export class FileResponse extends Response {
 				.map(x => {
 					x = +x;
 
-					if (isNaN(x) || x < Number.MIN_SAFE_INTEGER || x > Number.MAX_SAFE_INTEGER) {
+					if (!x || isNaN(x) || x < Number.MIN_SAFE_INTEGER || x > Number.MAX_SAFE_INTEGER) {
 						return null;
 					}
 
@@ -1255,7 +1257,7 @@ export class FileResponse extends Response {
 				offset = data.size - 1;
 			}
 
-			let size = (numbers[1] ?? (data.size - 1)) - offset + 1;
+			let size = (numbers[1] ?? (this.#maxChunkSize - 1 + offset)) - offset + 1;
 
 			if (size < 0) {
 				size = 0;
@@ -1290,13 +1292,9 @@ export class FileResponse extends Response {
 
 			filehandle = await fs.open(this.#filePath, 'r');
 
-			if (requestedPosition > 0) {
-				await filehandle.read(Buffer.alloc(0), 0, 0, requestedPosition);
-			}
-
 			for (let offset = 0; offset < requestedSize; offset += this.#maxChunkSize) {
 				const size = Math.min(this.#maxChunkSize, requestedSize - offset);
-				const chunk = await filehandle.read(Buffer.alloc(size), 0, size);
+				const chunk = await filehandle.read(Buffer.alloc(size), 0, size, offset + requestedPosition);
 				yield chunk.buffer;
 				await new Promise(resolve => setTimeout(resolve, 100));
 			}

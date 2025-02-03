@@ -1160,6 +1160,7 @@ export class FileResponse extends Response {
 	#dataPromise = null;
 
 	#maxChunkSize = 16 * 1024 * 1024;
+	#fragmentRequestMap = new WeakMap();
 
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
@@ -1169,18 +1170,39 @@ export class FileResponse extends Response {
 		this.setCookies(cookies);
 	}
 
-	async getCode() {
+	async getCode(headers = null) {
+		const requestedFragment = await this.#getFragmentRequest(headers);
 		const data = await this.#retreiveData();
+
+		if (requestedFragment) {
+			return 206;
+		}
+
 		return data.code;
 	}
 
-	async getHeaders() {
+	async getHeaders(headers = null) {
+		const requestedFragment = await this.#getFragmentRequest(headers);
 		const data = await this.#retreiveData();
+
+		if (requestedFragment) {
+			return {
+				'Content-Range': `bytes ${requestedFragment.offset}-${requestedFragment.offset + requestedFragment.size - 1}/${data.size}`,
+				...data.headers,
+			};
+		}
+
 		return data.headers;
 	}
 
-	async getBody() {
+	async getBody(headers = null) {
+		const requestedFragment = await this.#getFragmentRequest(headers);
 		const data = await this.#retreiveData();
+
+		if (requestedFragment) {
+			return () => data.body(requestedFragment);
+		}
+
 		return data.body;
 	}
 
@@ -1190,9 +1212,69 @@ export class FileResponse extends Response {
 
 	setFilePath(filePath) {
 		this.#filePath = filePath;
+		this.#dataPromise = null;
 	}
 
-	async * #getBodyStream() {
+	async #getFragmentRequest(headers) {
+		let result = this.#fragmentRequestMap.get(headers);
+
+		if (result === undefined && headers?.['range']) {
+			if (headers['range'].includes(',')) {
+				this.#fragmentRequestMap.set(headers, null);
+				return null;
+			}
+
+			const numbers = headers['range']
+				.trim()
+				.replace('bytes=', '')
+				.split(/\b\s*-\s*/gm)
+				.map(x => {
+					x = +x;
+
+					if (isNaN(x) || x < Number.MIN_SAFE_INTEGER || x > Number.MAX_SAFE_INTEGER) {
+						return null;
+					}
+
+					return Math.floor(x);
+				});
+
+			const data = await this.#retreiveData();
+
+			if (data.code < 200 || data.code > 299 || typeof data.body !== 'function') {
+				this.#fragmentRequestMap.set(headers, null);
+				return null;
+			}
+
+			let offset = numbers[0] ?? 0;
+
+			if (offset < 0) {
+				offset = data.size + offset;
+			}
+
+			if (offset >= data.size) {
+				offset = data.size - 1;
+			}
+
+			let size = (numbers[1] ?? (data.size - 1)) - offset + 1;
+
+			if (size < 0) {
+				size = 0;
+			}
+
+			size = Math.min(size, data.size - offset);
+
+			result = {
+				offset,
+				size,
+			};
+
+			this.#fragmentRequestMap.set(headers, result);
+		}
+
+		return result ?? null;
+	}
+
+	async * #getBodyStream(fragmentRequest) {
 		const data = await this.#retreiveData();
 
 		if (typeof data.body !== 'function') {
@@ -1203,10 +1285,17 @@ export class FileResponse extends Response {
 		let filehandle;
 
 		try {
+			const requestedPosition = fragmentRequest?.offset ?? 0;
+			const requestedSize = fragmentRequest?.size ?? data.size;
+
 			filehandle = await fs.open(this.#filePath, 'r');
 
-			for (let offset = 0; offset < data.size; offset += this.#maxChunkSize) {
-				const size = Math.min(this.#maxChunkSize, data.size - offset);
+			if (requestedPosition > 0) {
+				await filehandle.read(Buffer.alloc(0), 0, 0, requestedPosition);
+			}
+
+			for (let offset = 0; offset < requestedSize; offset += this.#maxChunkSize) {
+				const size = Math.min(this.#maxChunkSize, requestedSize - offset);
 				const chunk = await filehandle.read(Buffer.alloc(size), 0, size);
 				yield chunk.buffer;
 				await new Promise(resolve => setTimeout(resolve, 100));
@@ -1224,7 +1313,7 @@ export class FileResponse extends Response {
 				try {
 					filehandle = await fs.open(this.#filePath, 'r');
 					const size = (await filehandle.stat()).size;
-					const body = size > this.#maxChunkSize ? (() => this.#getBodyStream()) : await filehandle.readFile();
+					const body = size > this.#maxChunkSize ? (fragmentRequest => this.#getBodyStream(fragmentRequest)) : await filehandle.readFile();
 
 					resolve({
 						code: this.#code,
@@ -1530,12 +1619,15 @@ async function handleRequest(req, routes, staticFileDirectory) {
 		message: 'Invalid data'
 	}, 400);
 
+	let requestHeaders;
+
 	try {
 		const request = new Request(req);
 
 		const method = request.getMethod();
 		const path = request.getPath();
 		const pathParams = {};
+		requestHeaders = request.getHeaders();
 
 		let routeHandler = routes;
 		let handleOptions = false;
@@ -1584,7 +1676,7 @@ async function handleRequest(req, routes, staticFileDirectory) {
 
 			if (method === 'OPTIONS' && typeof routeHandler?.[`/${method}/`] !== 'function') {
 				handleOptions = true;
-				routeHandler = routeHandler?.[`/${request.getHeaders()?.['access-control-request-method']}/`.toUpperCase()];
+				routeHandler = routeHandler?.[`/${requestHeaders?.['access-control-request-method']}/`.toUpperCase()];
 			} else {
 				routeHandler = routeHandler?.[`/${method}/`];
 			}
@@ -1613,7 +1705,7 @@ async function handleRequest(req, routes, staticFileDirectory) {
 	}
 
 	try {
-		return [await response.getCode(), await response.getHeaders(), await response.getBody()];
+		return [await response.getCode(requestHeaders), await response.getHeaders(requestHeaders), await response.getBody(requestHeaders)];
 	} catch (error) {
 		console.error(error);
 

@@ -1159,7 +1159,7 @@ export class FileResponse extends Response {
 
 	#dataPromise = null;
 
-	#maxChunkSize = 16 * 1024 * 1024;
+	#maxChunkSize = 4 * 1024 * 1024;
 	#fragmentRequestMap = new WeakMap();
 
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
@@ -1296,7 +1296,6 @@ export class FileResponse extends Response {
 				const size = Math.min(this.#maxChunkSize, requestedSize - offset);
 				const chunk = await filehandle.read(Buffer.alloc(size), 0, size, offset + requestedPosition);
 				yield chunk.buffer;
-				await new Promise(resolve => setTimeout(resolve, 100));
 			}
 		} finally {
 			filehandle?.close();
@@ -1457,7 +1456,15 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 
 				if (typeof body === 'function') {
 					for await (const chunk of body()) {
+						if (res.closed) {
+							break;
+						}
+
 						res.write(chunk);
+
+						while (res.writableNeedDrain && !res.closed) {
+							await new Promise(resolve => setTimeout(resolve, 50));
+						}
 					}
 				} else {
 					res.write(body);

@@ -3,6 +3,7 @@ import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
 
 const servers = new Map();
+const keepAliveTimeout = 20000;
 
 const mimeTypes = {
 	"x3d": "application/vnd.hzn-3d-crossword",
@@ -1456,14 +1457,16 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 
 				if (typeof body === 'function') {
 					for await (const chunk of body()) {
-						if (res.closed) {
+						if (res.closed || res.destroyed) {
 							break;
 						}
 
 						res.write(chunk);
+						let waitTime = 0;
 
-						while (res.writableNeedDrain && !res.closed) {
+						while (res.writableNeedDrain && !res.closed && !res.destroyed && waitTime < keepAliveTimeout) {
 							await new Promise(resolve => setTimeout(resolve, 50));
+							waitTime += 50;
 						}
 					}
 				} else {
@@ -1477,6 +1480,9 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 		});
 
 		servers.set(port, server);
+
+		server.keepAliveTimeout = keepAliveTimeout;
+		server.headersTimeout = keepAliveTimeout;
 
 		server.on('error', (error) => {
 			unserve(port);

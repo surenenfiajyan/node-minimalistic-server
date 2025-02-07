@@ -1639,7 +1639,7 @@ function normalizeRoutes(routes, handleServerError) {
 						}
 
 						safePrint(error);
-						return wrapInResponseClass(await handler(request, error));
+						return wrapInResponseClass(await handleServerError(request, error));
 					}
 				};
 			}

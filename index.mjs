@@ -792,7 +792,7 @@ export class Request {
 	}
 
 	getRawUrl() {
-		this.#request.url;
+		return this.#request.url;
 	}
 
 	getRawBody() {

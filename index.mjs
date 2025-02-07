@@ -5,6 +5,20 @@ import * as fs from "node:fs/promises";
 const servers = new Map();
 const keepAliveTimeout = 20000;
 
+function safePrint(data, isError = false) {
+	try {
+		if (isError) {
+			console.error(data);
+			console.trace('Stack trace');
+		} else {
+			console.log(data);
+		}
+	} catch (e) {
+		console.error('Error printing data');
+		console.trace('Stack trace');
+	}
+}
+
 const mimeTypes = {
 	"x3d": "application/vnd.hzn-3d-crossword",
 	"3gp": "video/3gpp",
@@ -727,6 +741,7 @@ export class Request {
 	#queryParams = {};
 	#pathParams = {};
 
+	#rawBodyPromise;
 	#bodyPromise;
 	#allParams;
 	#cookies;
@@ -776,7 +791,31 @@ export class Request {
 		return this.#pathParams;
 	}
 
-	async getBody() {
+	getRawUrl() {
+		this.#request.url;
+	}
+
+	getRawBody() {
+		if (!this.#rawBodyPromise) {
+			this.#rawBodyPromise = new Promise((resolve, reject) => {
+				const body = [];
+
+				this.#request.on('data', (chunk) => {
+					body.push(chunk);
+				}).on('end', () => {
+					resolve(Buffer.concat(body));
+				}).on('timeout', (error) => {
+					reject(error);
+				}).on('error', (error) => {
+					reject(error);
+				});
+			});
+		}
+
+		return this.#rawBodyPromise;
+	}
+
+	getBody() {
 		if (!this.#bodyPromise) {
 			this.#bodyPromise = new Promise((resolve, reject) => {
 				const contentType = this.#headers['content-type'] ?? '';
@@ -785,13 +824,7 @@ export class Request {
 					resolve(this.#normalizeFormFields(this.#queryParams));
 				}
 
-				let body = [];
-
-				this.#request.on('data', (chunk) => {
-					body.push(chunk);
-				}).on('end', async () => {
-					body = Buffer.concat(body);
-
+				this.getRawBody().then(async body => {
 					if (contentType.includes('application/x-www-form-urlencoded')) {
 						try {
 							resolve(this.#parseUrlEncodedForm(body));
@@ -811,17 +844,15 @@ export class Request {
 							reject(error);
 						}
 					} else {
-						resolve(body);
+						resolve({ body });
 					}
-				}).on('timeout', (error) => {
-					reject(error);
-				}).on('error', (error) => {
+				}).catch(error => {
 					reject(error);
 				});
 			});
 		}
 
-		return await this.#bodyPromise;
+		return this.#bodyPromise;
 	}
 
 	#normalizeFormFields(fields) {
@@ -1162,6 +1193,7 @@ export class FileResponse extends Response {
 
 	#maxChunkSize = 4 * 1024 * 1024;
 	#fragmentRequestMap = new WeakMap();
+	#makeNotFoundResponse = null;
 
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
@@ -1215,6 +1247,11 @@ export class FileResponse extends Response {
 
 	setFilePath(filePath) {
 		this.#filePath = filePath;
+		this.#dataPromise = null;
+	}
+
+	setNotFoundErrorCustomResponseHandler(handler) {
+		this.#makeNotFoundResponse = handler;
 		this.#dataPromise = null;
 	}
 
@@ -1305,7 +1342,7 @@ export class FileResponse extends Response {
 
 	#retreiveData() {
 		if (!this.#dataPromise) {
-			this.#dataPromise = new Promise(async (resolve) => {
+			this.#dataPromise = new Promise(async resolve => {
 				let filehandle;
 
 				try {
@@ -1324,14 +1361,33 @@ export class FileResponse extends Response {
 						size,
 					});
 				} catch (e) {
-					console.error(e);
-					resolve({
+					safePrint(e, true);
+
+					const notFountData = {
 						code: 404,
 						headers: this.getMergedWithOtherHeaders({ 'Content-Type': 'application/json' }),
 						body: JSON.stringify({
 							message: `File not found`
 						})
-					});
+					};
+
+					try {
+						const response = await this.#makeNotFoundResponse?.(this.#filePath);
+
+						if (response instanceof Response) {
+							const code = await response.getCode();
+							const headers = await response.getHeaders();
+							const body = await response.getBody();
+
+							notFountData.code = code;
+							notFountData.headers = headers;
+							notFountData.body = body;
+						}
+					} catch (error) {
+						safePrint(error, true);
+					}
+
+					resolve(notFountData);
 				} finally {
 					await filehandle?.close();
 				}
@@ -1438,10 +1494,10 @@ export class RedirectResponse extends Response {
 	}
 }
 
-export function serve(routes, port = 80, staticFileDirectory = null) {
+export function serve(routes, port = 80, staticFileDirectory = null, handleNotFoundError = null, handleServerError = null) {
 	port = +port;
-	routes = normalizeRoutes(routes);
-	console.log(routes);
+	routes = normalizeRoutes(routes, handleServerError);
+	safePrint(routes);
 
 	if (staticFileDirectory !== null && staticFileDirectory !== undefined) {
 		staticFileDirectory = `${staticFileDirectory}`.split('/').filter(x => x).join('/');
@@ -1452,7 +1508,7 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 
 		const server = http.createServer(async (req, res) => {
 			try {
-				const [code, headers, body] = await handleRequest(req, routes, staticFileDirectory);
+				const [code, headers, body] = await handleRequest(req, routes, staticFileDirectory, handleNotFoundError);
 				res.writeHead(code, headers);
 
 				if (typeof body === 'function') {
@@ -1473,7 +1529,7 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 					res.write(body);
 				}
 			} catch (error) {
-				console.error(error);
+				safePrint(error, true);
 			} finally {
 				res.end();
 			}
@@ -1486,14 +1542,14 @@ export function serve(routes, port = 80, staticFileDirectory = null) {
 
 		server.on('error', (error) => {
 			unserve(port);
-			console.error(error);
+			safePrint(error, true);
 		});
 
 		server.listen(port, () => {
-			console.log(`Server started on port ${port}`);
+			safePrint(`Server started on port ${port}`);
 		});
 	} catch (e) {
-		console.error(e);
+		safePrint(e, true);
 	}
 
 
@@ -1511,13 +1567,13 @@ export function unserve(port = 80) {
 	port = +port;
 
 	servers.get(port)?.close(() => {
-		console.log(`Server closed on port ${port}`);
+		safePrint(`Server closed on port ${port}`);
 	});
 
 	servers.delete(port);
 }
 
-function normalizeRoutes(routes) {
+function normalizeRoutes(routes, handleServerError) {
 	const flatten = {};
 
 	function flattenRecursively(root, path = '', preMiddlewares = [], postMiddlewares = []) {
@@ -1570,6 +1626,23 @@ function normalizeRoutes(routes) {
 
 				return response;
 			};
+
+			if (handleServerError) {
+				const callback = flatten[path];
+
+				flatten[path] = async (request, handleOptions = false) => {
+					try {
+						return await callback(request, handleOptions);
+					} catch (error) {
+						if (error instanceof Response) {
+							throw error;
+						}
+
+						safePrint(error);
+						return wrapInResponseClass(await handler(request, error));
+					}
+				};
+			}
 		}
 	}
 
@@ -1625,15 +1698,16 @@ export function clearStaticCache(path = null) {
 	}
 }
 
-async function handleRequest(req, routes, staticFileDirectory) {
+async function handleRequest(req, routes, staticFileDirectory, handleNotFoundError) {
 	let response = new JsonResponse({
 		message: 'Invalid data'
 	}, 400);
 
 	let requestHeaders;
+	let request;
 
 	try {
-		const request = new Request(req);
+		request = new Request(req);
 
 		const method = request.getMethod();
 		const path = request.getPath();
@@ -1650,10 +1724,15 @@ async function handleRequest(req, routes, staticFileDirectory) {
 				let resp = staticCache.get(filePath);
 
 				if (!resp) {
-					resp = new FileResponse(decodeURI(path));
+					const resp = new FileResponse(decodeURI(path));
 					resp.addCustomHeaders({
 						'Cache-Control': 'public, max-age=432000',
 					});
+
+					if (handleNotFoundError) {
+						resp.setNotFoundErrorCustomResponseHandler(() => handleNotFoundError(request));
+					}
+
 					staticCache.set(filePath, resp);
 				}
 
@@ -1697,9 +1776,13 @@ async function handleRequest(req, routes, staticFileDirectory) {
 			request.setPathParams(pathParams);
 			response = await routeHandler(request, handleOptions);
 		} else {
-			response = new JsonResponse({
-				message: `Route ${method} "${path}" not found`
-			}, 404);
+			response = await handleNotFoundError?.(request);
+
+			if (!(response instanceof Response)) {
+				response = new JsonResponse({
+					message: `Route ${method} "${path}" not found`
+				}, 404);
+			}
 		}
 
 		request.setPathParams(pathParams);
@@ -1707,7 +1790,7 @@ async function handleRequest(req, routes, staticFileDirectory) {
 		if (error instanceof Response) {
 			response = error;
 		} else {
-			console.error(error);
+			safePrint(error, true);
 
 			response = new JsonResponse({
 				message: 'Something went wrong'
@@ -1718,7 +1801,7 @@ async function handleRequest(req, routes, staticFileDirectory) {
 	try {
 		return [await response.getCode(requestHeaders), await response.getHeaders(requestHeaders), await response.getBody(requestHeaders)];
 	} catch (error) {
-		console.error(error);
+		safePrint(error, true);
 
 		response = new JsonResponse({
 			message: 'Something went wrong'

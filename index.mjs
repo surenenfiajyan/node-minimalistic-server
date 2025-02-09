@@ -1704,10 +1704,9 @@ async function handleRequest(req, routes, staticFileDirectory, handleNotFoundErr
 	}, 400);
 
 	let requestHeaders;
-	let request;
 
 	try {
-		request = new Request(req);
+		const request = new Request(req);
 
 		const method = request.getMethod();
 		const path = request.getPath();
@@ -1799,7 +1798,7 @@ async function handleRequest(req, routes, staticFileDirectory, handleNotFoundErr
 	}
 
 	try {
-		return [await response.getCode(requestHeaders), await response.getHeaders(requestHeaders), await response.getBody(requestHeaders)];
+		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), response.getBody(requestHeaders)]);
 	} catch (error) {
 		safePrint(error, true);
 

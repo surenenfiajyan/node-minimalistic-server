@@ -1,12 +1,12 @@
 {
   "name": "minimalistic-server",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "engines" : { 
     "npm" : ">=8.6.0",
     "node" : ">=22.0.0"
   },
   "type": "module",
-  "description": "Minimalistic server library hor Node.js. It supports routing, middlewares, parsing common request bodies (JSON, form data, etc).",
+  "description": "Minimalistic server library hor Node.js. It supports routing, middlewares, parsing common request bodies (JSON, form data, etc), static file serving.",
   "main": "index.mjs",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

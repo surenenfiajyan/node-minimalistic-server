@@ -1,6 +1,8 @@
 import * as http from 'node:http';
 import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
+import { start } from 'node:repl';
+import { type } from 'node:os';
 
 const servers = new Map();
 const keepAliveTimeout = 20000;
@@ -1194,6 +1196,7 @@ export class FileResponse extends Response {
 	#maxChunkSize = 4 * 1024 * 1024;
 	#fragmentRequestMap = new WeakMap();
 	#makeNotFoundResponse = null;
+	#urlPathForDirectory = null;
 
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
@@ -1252,6 +1255,11 @@ export class FileResponse extends Response {
 
 	setNotFoundErrorCustomResponseHandler(handler) {
 		this.#makeNotFoundResponse = handler;
+		this.#dataPromise = null;
+	}
+
+	setUrlPathForDirectory(urlPathForDirectory) {
+		this.#urlPathForDirectory = urlPathForDirectory;
 		this.#dataPromise = null;
 	}
 
@@ -1314,6 +1322,45 @@ export class FileResponse extends Response {
 		return result ?? null;
 	}
 
+	async * #getDirectoryStream() {
+		const data = await this.#retreiveData();
+
+		if (typeof data.body !== 'function') {
+			yield data.body;
+			return;
+		}
+
+		const urlPath = this.#urlPathForDirectory;
+		const parentUrlPath = urlPath.split('/').filter((x, i, arr) => x && i !== arr.length - 1).join('/');
+		const filePath = this.#filePath;
+
+		yield `<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>${escapeHtml(urlPath)}</title>
+</head>
+<body>
+${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
+`;
+
+		const files = await fs.readdir(filePath);
+		let counter = 0;
+
+		for (const file of files) {
+			if (counter === 100) {
+				await new Promise(resolve => setTimeout(resolve, 50));
+			}
+
+			++counter;
+
+			yield `<a href="/${urlPath}/${encodeURIComponent(file)}">${escapeHtml(file)}</a><br>`;
+		}
+
+
+		yield `</body>`
+
+	}
+
 	async * #getBodyStream(fragmentRequest) {
 		const data = await this.#retreiveData();
 
@@ -1347,14 +1394,23 @@ export class FileResponse extends Response {
 
 				try {
 					filehandle = await fs.open(this.#filePath, 'r');
-					const size = (await filehandle.stat()).size;
-					const body = size > this.#maxChunkSize ? (fragmentRequest => this.#getBodyStream(fragmentRequest)) : await filehandle.readFile();
+					const stat = await filehandle.stat();
+					const size = stat.size;
+					const readAsDirectory = stat.isDirectory() && this.#urlPathForDirectory !== null;
+					const body = size > this.#maxChunkSize ? (fragmentRequest => this.#getBodyStream(fragmentRequest)) : (readAsDirectory ? (() => this.#getDirectoryStream()) : await filehandle.readFile());
+
+					if (readAsDirectory) {
+						this.addCustomHeaders({ 'Cache-Control': 'no-store, no-cache, must-revalidate' });
+					}
 
 					resolve({
 						code: this.#code,
 						headers: this.getMergedWithOtherHeaders({
-							'Content-Type': this.#contentType ?? mimeTypes[this.#filePath.split('.').at(-1).toLowerCase()] ?? 'application/octet-stream',
-							'Content-Length': size,
+							'Content-Type': this.#contentType ??
+								(readAsDirectory ? 'text/html; charset=utf-8' : null) ??
+								mimeTypes[this.#filePath.split('.').at(-1).toLowerCase()] ??
+								'application/octet-stream',
+							'Content-Length': readAsDirectory ? null : size,
 						}
 						),
 						body,
@@ -1494,21 +1550,19 @@ export class RedirectResponse extends Response {
 	}
 }
 
-export function serve(routes, port = 80, staticFileDirectory = null, handleNotFoundError = null, handleServerError = null) {
+export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null, handleNotFoundError = null, handleServerError = null) {
 	port = +port;
 	routes = normalizeRoutes(routes, handleServerError);
+	staticFileDirectoryOrDirectories = normalizeStaticFileDirectories(staticFileDirectoryOrDirectories);
 	safePrint(routes);
-
-	if (staticFileDirectory !== null && staticFileDirectory !== undefined) {
-		staticFileDirectory = `${staticFileDirectory}`.split('/').filter(x => x).join('/');
-	}
+	safePrint(staticFileDirectoryOrDirectories);
 
 	try {
 		unserve(port);
 
 		const server = http.createServer(async (req, res) => {
 			try {
-				const [code, headers, body] = await handleRequest(req, routes, staticFileDirectory, handleNotFoundError);
+				const [code, headers, body] = await handleRequest(req, routes, staticFileDirectoryOrDirectories, handleNotFoundError);
 				res.writeHead(code, headers);
 
 				if (typeof body === 'function') {
@@ -1571,6 +1625,39 @@ export function unserve(port = 80) {
 	});
 
 	servers.delete(port);
+}
+
+function normalizeStaticFileDirectories(staticFileDirectoryOrDirectories) {
+	if (staticFileDirectoryOrDirectories !== null && staticFileDirectoryOrDirectories !== undefined) {
+		if (!Array.isArray(staticFileDirectoryOrDirectories)) {
+			staticFileDirectoryOrDirectories = [staticFileDirectoryOrDirectories];
+		}
+
+		staticFileDirectoryOrDirectories = staticFileDirectoryOrDirectories.filter(x => x !== null && typeof x === 'object' || typeof x === 'string').map(x => {
+			let serverFilePath = '', urlPath = '', showWholeDirectory = false;;
+
+			if (typeof x === 'string') {
+				serverFilePath = urlPath = x;
+				showWholeDirectory = false;
+			} else {
+				({ serverPath: serverFilePath, urlPath, showWholeDirectory } = x);
+			}
+
+			urlPath = `${urlPath}`.split('/').filter(x => x).join('/');
+			serverFilePath = `${serverFilePath}`.split('/').filter(x => x).join('/');
+			showWholeDirectory = !!showWholeDirectory;
+
+			return {
+				urlPath,
+				serverFilePath,
+				showWholeDirectory,
+			};
+		});
+	} else {
+		staticFileDirectoryOrDirectories = [];
+	}
+
+	return staticFileDirectoryOrDirectories;
 }
 
 function normalizeRoutes(routes, handleServerError) {
@@ -1698,7 +1785,7 @@ export function clearStaticCache(path = null) {
 	}
 }
 
-async function handleRequest(req, routes, staticFileDirectory, handleNotFoundError) {
+async function handleRequest(req, routes, staticFileDirectories, handleNotFoundError) {
 	let response = new JsonResponse({
 		message: 'Invalid data'
 	}, 400);
@@ -1716,9 +1803,11 @@ async function handleRequest(req, routes, staticFileDirectory, handleNotFoundErr
 		let routeHandler = routes;
 		let handleOptions = false;
 
-		if (staticFileDirectory && method === 'GET' && path.startsWith(staticFileDirectory)) {
+		const staticFileOrDirectory = method === 'GET' ? staticFileDirectories.find(x => x.urlPath === path || path.startsWith(x.urlPath + '/')) : null;
+
+		if (staticFileOrDirectory) {
 			routeHandler = () => {
-				const filePath = decodeURI(path);
+				const filePath = decodeURI(path).replace(staticFileOrDirectory.urlPath, staticFileOrDirectory.serverFilePath);
 
 				let resp = staticCache.get(filePath);
 
@@ -1732,7 +1821,18 @@ async function handleRequest(req, routes, staticFileDirectory, handleNotFoundErr
 						resp.setNotFoundErrorCustomResponseHandler(() => handleNotFoundError(request));
 					}
 
+					if (staticFileOrDirectory.showWholeDirectory) {
+						resp.setUrlPathForDirectory(path);
+					}
+
 					staticCache.set(filePath, resp);
+
+					if (staticCache.size > 500) {
+						for (const k of staticCache.keys()) {
+							staticCache.delete(k);
+							break;
+						}
+					}
 				}
 
 				return resp;

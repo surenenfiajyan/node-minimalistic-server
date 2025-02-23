@@ -5,6 +5,8 @@ import * as fs from "node:fs/promises";
 const servers = new Map();
 const keepAliveTimeout = 20000;
 
+let currentFsPromiseModule = fs;
+
 function safePrint(data, isError = false) {
 	try {
 		if (isError) {
@@ -710,6 +712,14 @@ const mimeTypes = {
 	"rss": "application/rss+xml"
 };
 
+export function getServerFsPromiseModule() {
+	return currentFsPromiseModule;
+}
+
+export function setServerFsPromiseModule(fsPromiseModule) {
+	currentFsPromiseModule = fsPromiseModule;
+}
+
 export class UploadedFile {
 	#content;
 	#contentType;
@@ -1349,7 +1359,7 @@ export class FileResponse extends Response {
 ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 `;
 
-		const files = await fs.readdir(filePath);
+		const files = await currentFsPromiseModule.readdir(filePath);
 		let counter = 0;
 
 		for (const file of files) {
@@ -1381,7 +1391,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 			const requestedPosition = fragmentRequest?.offset ?? 0;
 			const requestedSize = fragmentRequest?.size ?? data.size;
 
-			filehandle = await fs.open(this.#filePath, 'r');
+			filehandle = await currentFsPromiseModule.open(this.#filePath, 'r');
 
 			for (let offset = 0; offset < requestedSize; offset += this.#maxChunkSize) {
 				const size = Math.min(this.#maxChunkSize, requestedSize - offset);
@@ -1399,7 +1409,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 				let filehandle;
 
 				try {
-					filehandle = await fs.open(this.#filePath, 'r');
+					filehandle = await currentFsPromiseModule.open(this.#filePath, 'r');
 					const stat = await filehandle.stat();
 					const size = stat.size;
 					const readAsDirectory = stat.isDirectory() && this.#urlPathForDirectory !== null;

@@ -1638,7 +1638,7 @@ function normalizeStaticFileDirectories(staticFileDirectoryOrDirectories) {
 				serverFilePath = urlPath = x;
 				showWholeDirectory = false;
 			} else {
-				({ serverPath: serverFilePath, urlPath, showWholeDirectory } = x);
+				({ serverFilePath, urlPath, showWholeDirectory } = x);
 			}
 
 			urlPath = `${urlPath}`.split('/').filter(x => x).join('/');

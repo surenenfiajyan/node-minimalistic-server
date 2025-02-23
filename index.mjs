@@ -718,6 +718,7 @@ export function getServerFsPromiseModule() {
 
 export function setServerFsPromiseModule(fsPromiseModule) {
 	currentFsPromiseModule = fsPromiseModule;
+	clearStaticCache();
 }
 
 export class UploadedFile {

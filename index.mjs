@@ -729,6 +729,14 @@ export class UploadedFile {
 		return this.#contentType;
 	}
 
+	getExtenion() {
+		return this.#fileName?.toLowerCase().split('.').at(-1) ?? '';
+	}
+
+	getContentTypeByExtenion() {
+		return mimeTypes[this.getExtenion()] ?? 'application/octet-stream';
+	}
+
 	getFileName() {
 		return this.#fileName;
 	}

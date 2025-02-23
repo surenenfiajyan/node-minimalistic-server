@@ -1810,7 +1810,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 				let resp = staticCache.get(filePath);
 
 				if (!resp) {
-					resp = new FileResponse(decodeURI(path));
+					resp = new FileResponse(filePath);
 					resp.addCustomHeaders({
 						'Cache-Control': 'public, max-age=432000',
 					});

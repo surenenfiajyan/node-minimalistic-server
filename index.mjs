@@ -1,6 +1,7 @@
 import * as http from 'node:http';
 import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
+import * as tls from "node:tls";
 
 const servers = new Map();
 const keepAliveTimeout = 20000;
@@ -792,6 +793,24 @@ export class Request {
 
 	getHeaders() {
 		return this.#headers;
+	}
+
+	getPort() {
+		return this.#request.socket.address().port;
+	}
+
+	getProtocol() {
+		const socket = this.#request.socket;
+
+		if (socket instanceof tls.TLSSocket && socket.encrypted) {
+			return 'https';
+		}
+
+		return 'http';
+	}
+
+	getHost() {
+		return this.#request.headers.host;
 	}
 
 	getPath() {

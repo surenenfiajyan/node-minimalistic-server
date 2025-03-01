@@ -752,6 +752,14 @@ export class UploadedFile {
 	getFileName() {
 		return this.#fileName;
 	}
+
+	toJSON() {
+		return {
+			content: this.#content,
+			contentType: this.#contentType,
+			fileName: this.#fileName,
+		};
+	}
 }
 
 export class Request {
@@ -1082,6 +1090,15 @@ export class Request {
 
 	getCustomData() {
 		return this.#customData;
+	}
+
+	toJSON() {
+		return {
+			method: this.#method,
+			headers: this.#headers,
+			path: this.#path,
+			queryParams: this.#queryParams,
+		};
 	}
 }
 

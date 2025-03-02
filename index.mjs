@@ -1247,6 +1247,7 @@ export class FileResponse extends Response {
 	#dataPromise = null;
 
 	#maxChunkSize = 4 * 1024 * 1024;
+	#defaultfragmentSize = 256 * 1024;
 	#fragmentRequestMap = new WeakMap();
 	#makeNotFoundResponse = null;
 	#urlPathForDirectory = null;
@@ -1279,8 +1280,15 @@ export class FileResponse extends Response {
 				...data.headers,
 				'Content-Range': `bytes ${requestedFragment.offset}-${requestedFragment.offset + requestedFragment.size - 1}/${data.size}`,
 				'Content-Length': `${requestedFragment.size}`,
-
+				'Cache-Control': 'no-store, no-cache, must-revalidate',
 			};
+		}
+
+		if (typeof data.body === 'function') {
+			return {
+				...data.headers,
+				'Cache-Control': 'no-store, no-cache, must-revalidate',
+			}
 		}
 
 		return data.headers;
@@ -1356,7 +1364,7 @@ export class FileResponse extends Response {
 				offset = data.size - 1;
 			}
 
-			let size = (numbers[1] ?? (this.#maxChunkSize - 1 + offset)) - offset + 1;
+			let size = (numbers[1] ?? (this.#defaultfragmentSize - 1 + offset)) - offset + 1;
 
 			if (size < 0) {
 				size = 0;
@@ -1451,10 +1459,6 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 					const size = stat.size;
 					const readAsDirectory = stat.isDirectory() && this.#urlPathForDirectory !== null;
 					const body = size > this.#maxChunkSize ? (fragmentRequest => this.#getBodyStream(fragmentRequest)) : (readAsDirectory ? (() => this.#getDirectoryStream()) : await filehandle.readFile());
-
-					if (readAsDirectory) {
-						this.addCustomHeaders({ 'Cache-Control': 'no-store, no-cache, must-revalidate' });
-					}
 
 					resolve({
 						code: this.#code,

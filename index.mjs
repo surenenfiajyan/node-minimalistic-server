@@ -2,6 +2,7 @@ import * as http from 'node:http';
 import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
 import * as tls from "node:tls";
+import * as nodeCrypto from "node:crypto";
 
 const servers = new Map();
 const keepAliveTimeout = 20000;
@@ -776,6 +777,8 @@ export class Request {
 
 	#request;
 	#customData = null;
+	#webSocketData = null;
+	#isWebSocketClosed = false;
 
 	constructor(request) {
 		this.#request = request;
@@ -842,6 +845,10 @@ export class Request {
 	}
 
 	getRawBody() {
+		if (this.#webSocketData) {
+			return Buffer.from([]);
+		}
+
 		if (!this.#rawBodyPromise) {
 			this.#rawBodyPromise = new Promise((resolve, reject) => {
 				const body = [];
@@ -862,6 +869,10 @@ export class Request {
 	}
 
 	getBody() {
+		if (this.#webSocketData) {
+			return {};
+		}
+
 		if (!this.#bodyPromise) {
 			this.#bodyPromise = new Promise((resolve, reject) => {
 				const contentType = this.#headers['content-type'] ?? '';
@@ -1099,6 +1110,280 @@ export class Request {
 			path: this.#path,
 			queryParams: this.#queryParams,
 		};
+	}
+
+	isHandledAsWebSocket() {
+		return !!this.#webSocketData;
+	}
+
+	handleAsWebSocket(callback) {
+		if (typeof callback === 'function') {
+			try {
+				this.#initWebSocket();
+			} catch (error) {
+				this.#closeWebSocket(true);
+				throw error;
+			}
+		} else {
+			throw new Error('Callback not provided');
+		}
+
+		const firstTime = this.#webSocketData.listeners.size === 0;
+
+		this.#webSocketData.listeners.add(callback);
+
+		if (firstTime) {
+			this.#handleWebSocketRequests();
+		}
+
+		return {
+			write: this.#webSocketData.write,
+			close: this.#webSocketData.close,
+		};
+	}
+
+	waitForWebSocketToClose() {
+		if (!this.#webSocketData || this.#isWebSocketClosed) {
+			return;
+		}
+
+		return new Promise(resolve => {
+			const socket = this.#request.socket;
+
+			socket.on("close", () => {
+				resolve();
+			});
+
+			socket.on("end", () => {
+				resolve();
+			});
+
+			socket.on("error", (error) => {
+				resolve();
+			});
+
+			socket.on('timeout', (error) => {
+				resolve();
+			});
+		})
+	}
+
+	async #readBytesFromWebSocket(size = 1) {
+		let result = Buffer.alloc(0);
+
+		do {
+			if (this.#isWebSocketClosed) {
+				throw new Error('Socket is closed');
+			}
+
+			this.#webSocketData.nextDataPromiseWithResolvers = null;
+			result = Buffer.concat([result, ...this.#webSocketData.collectedData]);
+			this.#webSocketData.collectedData = [];
+
+			if (result.length === size) {
+				return result;
+			}
+
+			if (result.length > size) {
+				this.#webSocketData.collectedData = [result.subarray(size)];
+				return result.subarray(0, size);
+			}
+
+			this.#webSocketData.nextDataPromiseWithResolvers = Promise.withResolvers();
+			await this.#webSocketData.nextDataPromiseWithResolvers.promise;
+		} while (true);
+	}
+
+	#initWebSocket() {
+		if (this.#isWebSocketClosed) {
+			throw new Error('Socket is already closed');
+		}
+
+		if (this.#webSocketData) {
+			return;
+		}
+
+		const socket = this.#request.socket;
+
+		this.#webSocketData = {
+			write: (data) => this.#writeIntoWebSocket(data),
+			close: () => this.#closeWebSocket(),
+			listeners: new Set(),
+			nextDataPromiseWithResolvers: null,
+			collectedData: [],
+		};
+
+		const guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+		const webSocketHeader = this.#headers["sec-websocket-key"];
+		const sha1 = nodeCrypto.createHash("sha1");
+		sha1.update(webSocketHeader + guid);
+		const validHandShakeKey = sha1.digest("base64");
+
+		const responseHeaders = [
+			"HTTP/1.1 101 Web Socket Protocols",
+			"Upgrade: WebSocket",
+			"Connection: Upgrade",
+			`Sec-WebSocket-Accept: ${validHandShakeKey}`,
+			"\r\n",
+		].join("\r\n");
+
+		socket.write(responseHeaders);
+
+		socket.on("data", (data) => {
+			this.#webSocketData.collectedData.push(data);
+			this.#webSocketData.nextDataPromiseWithResolvers?.resolve();
+			this.#webSocketData.nextDataPromiseWithResolvers = null;
+		});
+
+		socket.on("close", () => {
+			this.#closeWebSocket();
+		});
+
+
+		socket.on("end", () => {
+			this.#closeWebSocket();
+		});
+
+		socket.on("error", (error) => {
+			this.#webSocketData.nextDataPromiseWithResolvers?.reject(error);
+			this.#webSocketData.nextDataPromiseWithResolvers = null;
+			this.#closeWebSocket(true);
+		});
+
+		socket.on('timeout', (error) => {
+			this.#webSocketData.nextDataPromiseWithResolvers?.reject(error);
+			this.#webSocketData.nextDataPromiseWithResolvers = null;
+			this.#closeWebSocket(true);
+		});
+	}
+
+	async #handleWebSocketRequests() {
+		try {
+			let collectedPayload = [];
+
+			const sendNullToAllListeners = (type = 'start') => {
+				for (const listener of this.#webSocketData.listeners) {
+					try {
+						listener(null, type);
+					} catch (error) {
+						safePrint(error, true);
+					}
+				}
+			};
+
+			sendNullToAllListeners();
+
+			do {
+				const head = await this.#readBytesFromWebSocket(2);
+				const opCode = head[0] & 0b00001111;
+
+				if (opCode === 0b00001000) {
+					sendNullToAllListeners('end');
+					this.#closeWebSocket();
+					return;
+				}
+
+				const fin = !!(head[0] & 0b10000000);
+				const hasMask = !!(head[1] & 0b10000000);
+				let payloadLength = head[1] & 0b01111111;
+
+				if (payloadLength === 126) {
+					const payloadBytes = await this.#readBytesFromWebSocket(2);
+					payloadLength = 0;
+
+					for (let i = 0; i < 2; ++i) {
+						payloadLength += payloadBytes[1 - i] << (8 * i);
+					}
+				} else if (payloadLength === 127) {
+					const payloadBytes = await this.#readBytesFromWebSocket(8);
+					payloadLength = 0;
+
+					for (let i = 0; i < 8; ++i) {
+						payloadLength += payloadBytes[7 - i] << (8 * i);
+					}
+				}
+
+				const mask = hasMask ? (await this.#readBytesFromWebSocket(4)) : Buffer.alloc(4);
+				const payload = await this.#readBytesFromWebSocket(payloadLength);
+
+				for (let i = 0; i < payloadLength; ++i) {
+					payload[i] ^= mask[i & 0b11];
+				}
+
+				collectedPayload.push(payload);
+
+				if (fin) {
+					const finalBuffer = Buffer.concat(collectedPayload);
+					collectedPayload = [];
+
+					switch (opCode) {
+						case 0b00000001:
+						case 0b00000010:
+							for (const listener of this.#webSocketData.listeners) {
+								try {
+									await listener(opCode === 0b00000001 ? finalBuffer.toString('utf8') : finalBuffer, 'message');
+								} catch (error) {
+									safePrint(error, true);
+								}
+							}
+							break;
+						case 0b00001001:
+							this.#writeIntoWebSocket(finalBuffer, true);
+							break;
+						default:
+							throw new Error(`Invalid op code ${opCode}`);
+					}
+				}
+			} while (true);
+		} catch (error) {
+			safePrint(error, true);
+			this.#closeWebSocket(true);
+		}
+	}
+
+	#writeIntoWebSocket(data, isPong = false) {
+		if (this.#isWebSocketClosed || !this.#webSocketData) {
+			return;
+		}
+
+		const isString = typeof data === 'string';
+		const buffer = data instanceof Buffer ? buffer : (isString ? Buffer.from(data, 'utf-8') : Buffer.from(data));
+		const length = buffer.length;
+
+		let payloadLength = [length];
+
+		if (length > 65535) {
+			payloadLength[0] = 127;
+
+			for (let i = 7; i >= 0; --i) {
+				payloadLength.push((length >> (i * 8)) & 0b11111111);
+			}
+		} else if (length > 125) {
+			payloadLength[0] = 126;
+
+			for (let i = 1; i >= 0; --i) {
+				payloadLength.push((length >> (i * 8)) & 0b11111111);
+			}
+		}
+
+		const opCodeWithFin = Buffer.from([isPong ? 0b10001010 : (isString ? 0b10000001 : 0b10000010)]);
+		payloadLength = Buffer.from(payloadLength);
+
+		this.#request.socket.write(opCodeWithFin);
+		this.#request.socket.write(payloadLength);
+		this.#request.socket.write(buffer);
+	}
+
+	#closeWebSocket(error = false) {
+		if (this.#isWebSocketClosed || !this.#webSocketData) {
+			return;
+		}
+
+		this.#isWebSocketClosed = true;
+		const socket = this.#request.socket;
+		this.#webSocketData.nextDataPromiseWithResolvers?.reject(new Error('Socket is closed'));
+		this.#webSocketData.nextDataPromiseWithResolvers = null;
+		socket.end(Buffer.from(error ? [] : [0b10001000, 0b00000000]));
 	}
 }
 
@@ -1617,9 +1902,15 @@ export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null
 	try {
 		unserve(port);
 
-		const server = http.createServer(async (req, res) => {
+
+		const callback = async (req, res) => {
 			try {
-				const [code, headers, body] = await handleRequest(req, routes, staticFileDirectoryOrDirectories, handleNotFoundError);
+				const [code, headers, body, isHandledAsWebSocket] = await handleRequest(req, routes, staticFileDirectoryOrDirectories, handleNotFoundError);
+
+				if (isHandledAsWebSocket || !(res instanceof http.ServerResponse)) {
+					return;
+				}
+
 				res.writeHead(code, headers);
 
 				if (typeof body === 'function') {
@@ -1644,7 +1935,10 @@ export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null
 			} finally {
 				res.end();
 			}
-		});
+		};
+
+		const server = http.createServer(callback);
+		server.on('upgrade', callback);
 
 		servers.set(port, server);
 
@@ -1931,6 +2225,11 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 		if (typeof routeHandler === 'function') {
 			request.setPathParams(pathParams);
 			response = await routeHandler(request, handleOptions);
+
+			if (request.isHandledAsWebSocket()) {
+				await request.waitForWebSocketToClose();
+				return [null, null, null, true];
+			}
 		} else {
 			response = await handleNotFoundError?.(request);
 
@@ -1940,8 +2239,6 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 				}, 404);
 			}
 		}
-
-		request.setPathParams(pathParams);
 	} catch (error) {
 		if (error instanceof Response) {
 			response = error;
@@ -1955,7 +2252,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 	}
 
 	try {
-		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), response.getBody(requestHeaders)]);
+		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), response.getBody(requestHeaders), false]);
 	} catch (error) {
 		safePrint(error, true);
 
@@ -1963,6 +2260,6 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 			message: 'Something went wrong'
 		}, 500);
 
-		return [response.getCode(), response.getHeaders(), response.getBody()];
+		return [response.getCode(), response.getHeaders(), response.getBody(), false];
 	}
 }

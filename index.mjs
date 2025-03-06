@@ -854,9 +854,17 @@ export class Request {
 				const body = [];
 
 				this.#request.on('data', (chunk) => {
-					body.push(chunk);
+					try {
+						body.push(chunk);
+					} catch (error) {
+						reject(error);
+					}
 				}).on('end', () => {
-					resolve(Buffer.concat(body));
+					try {
+						resolve(Buffer.concat(body));
+					} catch (error) {
+						reject(error);
+					}
 				}).on('timeout', (error) => {
 					reject(error);
 				}).on('error', (error) => {
@@ -875,6 +883,9 @@ export class Request {
 
 		if (!this.#bodyPromise) {
 			this.#bodyPromise = new Promise((resolve, reject) => {
+				const maxJsonSize = 32 * 1024 * 1024;
+				const maxUrlSize = 1024 * 1024;
+
 				const contentType = this.#headers['content-type'] ?? '';
 
 				if (this.#method === 'GET' && !contentType.includes('application/x-www-form-urlencoded')) {
@@ -884,6 +895,10 @@ export class Request {
 				this.getRawBody().then(async body => {
 					if (contentType.includes('application/x-www-form-urlencoded')) {
 						try {
+							if (body.length > maxUrlSize) {
+								throw new Error(`The URL request size (${body.length} bytes) exceeds ${maxUrlSize} bytes`);
+							}
+
 							resolve(this.#parseUrlEncodedForm(body));
 						} catch (error) {
 							reject(error);
@@ -896,6 +911,10 @@ export class Request {
 						}
 					} else if (contentType.includes('application/json')) {
 						try {
+							if (body.length > maxJsonSize) {
+								throw new Error(`The JSON request size (${body.length} bytes) exceeds ${maxJsonSize} bytes`);
+							}
+
 							resolve(JSON.parse(body.toString()));
 						} catch (error) {
 							reject(error);
@@ -1207,9 +1226,13 @@ export class Request {
 
 		this.#webSocketData = {
 			write: (data) => this.#writeIntoWebSocket(data),
-			close: () => this.#closeWebSocket(),
+			close: () => {
+				this.#webSocketData.isManuallyClosed = true;
+				this.#closeWebSocket()
+			},
 			listeners: new Set(),
 			nextDataPromiseWithResolvers: null,
+			isManuallyClosed: false,
 			collectedData: [],
 		};
 
@@ -1258,27 +1281,35 @@ export class Request {
 	}
 
 	async #handleWebSocketRequests() {
+		const maxPayloadSize = 16 * 1024 * 1024;
+
+		const sendDataToAllListeners = async (data = null, type = 'start') => {
+			const statuses = await Promise.allSettled(this.#webSocketData.listeners.values().map(listener => listener(data, type)));
+
+			for (const status of statuses) {
+				if (status.status === 'rejected') {
+					safePrint(status.reason);
+				}
+			}
+		};
+
 		try {
 			let collectedPayload = [];
 
-			const sendNullToAllListeners = (type = 'start') => {
-				for (const listener of this.#webSocketData.listeners) {
-					try {
-						listener(null, type);
-					} catch (error) {
-						safePrint(error, true);
-					}
-				}
-			};
-
-			sendNullToAllListeners();
+			await new Promise((resolve) => setTimeout(resolve));
+			await sendDataToAllListeners();
 
 			do {
+				if (this.#isWebSocketClosed) {
+					await sendDataToAllListeners(null, 'end');
+					return;
+				}
+
 				const head = await this.#readBytesFromWebSocket(2);
 				const opCode = head[0] & 0b00001111;
 
 				if (opCode === 0b00001000) {
-					sendNullToAllListeners('end');
+					await sendDataToAllListeners(null, 'end');
 					this.#closeWebSocket();
 					return;
 				}
@@ -1303,6 +1334,10 @@ export class Request {
 					}
 				}
 
+				if (payloadLength > maxPayloadSize) {
+					throw new Error(`Payload size (${payloadLength} bytes) exceeds ${maxPayloadSize} bytes`);
+				}
+
 				const mask = hasMask ? (await this.#readBytesFromWebSocket(4)) : Buffer.alloc(4);
 				const payload = await this.#readBytesFromWebSocket(payloadLength);
 
@@ -1319,13 +1354,7 @@ export class Request {
 					switch (opCode) {
 						case 0b00000001:
 						case 0b00000010:
-							for (const listener of this.#webSocketData.listeners) {
-								try {
-									await listener(opCode === 0b00000001 ? finalBuffer.toString('utf8') : finalBuffer, 'message');
-								} catch (error) {
-									safePrint(error, true);
-								}
-							}
+							await sendDataToAllListeners(opCode === 0b00000001 ? finalBuffer.toString('utf8') : finalBuffer, 'message');
 							break;
 						case 0b00001001:
 							this.#writeIntoWebSocket(finalBuffer, true);
@@ -1338,6 +1367,12 @@ export class Request {
 		} catch (error) {
 			safePrint(error, true);
 			this.#closeWebSocket(true);
+
+			if (this.#webSocketData.isManuallyClosed) {
+				await sendDataToAllListeners(null, 'end');
+			} else {
+				await sendDataToAllListeners(error, 'erorr');
+			}
 		}
 	}
 

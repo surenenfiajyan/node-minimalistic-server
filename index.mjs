@@ -1222,6 +1222,14 @@ export class Request {
 			return;
 		}
 
+		const webSocketHeader = this.#headers["sec-websocket-key"];
+
+		if (!webSocketHeader) {
+			throw new JsonResponse({
+				message: 'Header "sec-websocket-key" is missing',
+			}, 400);
+		}
+
 		const socket = this.#request.socket;
 
 		this.#webSocketData = {
@@ -1237,7 +1245,6 @@ export class Request {
 		};
 
 		const guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-		const webSocketHeader = this.#headers["sec-websocket-key"];
 		const sha1 = nodeCrypto.createHash("sha1");
 		sha1.update(webSocketHeader + guid);
 		const validHandShakeKey = sha1.digest("base64");

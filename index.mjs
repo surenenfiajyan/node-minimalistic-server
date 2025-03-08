@@ -1616,6 +1616,7 @@ export class FileResponse extends Response {
 		if (requestedFragment) {
 			return {
 				...data.headers,
+				'Accept-Ranges':'bytes',
 				'Content-Range': `bytes ${requestedFragment.offset}-${requestedFragment.offset + requestedFragment.size - 1}/${data.size}`,
 				'Content-Length': `${requestedFragment.size}`,
 				'Cache-Control': 'no-store, no-cache, must-revalidate',

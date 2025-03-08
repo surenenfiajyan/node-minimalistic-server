@@ -1,6 +1,6 @@
 {
   "name": "minimalistic-server",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "engines" : { 
     "npm" : ">=8.6.0",
     "node" : ">=22.0.0"

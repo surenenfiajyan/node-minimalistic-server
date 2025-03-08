@@ -334,6 +334,7 @@ const mimeTypes = {
 	"mif": "application/vnd.mif",
 	"mj2": "video/mj2",
 	"mjs": "text/javascript",
+	"mkv": "video/x-matroska",
 	"mlp": "application/vnd.dolby.mlp",
 	"mmd": "application/vnd.chipnuts.karaoke-mmd",
 	"mmf": "application/vnd.smaf",

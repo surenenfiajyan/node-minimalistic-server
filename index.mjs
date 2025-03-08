@@ -2155,10 +2155,10 @@ function normalizeRoutes(routes, handleServerError) {
 		const split = route.split('/').filter(x => x);
 		let method = split.at(-1)?.toUpperCase();
 
-		if (['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'].includes(method)) {
+		if (['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'].includes(method)) {
 			split.pop();
 		} else {
-			method = 'GET'
+			method = 'GET';
 		}
 
 		let parent = result;
@@ -2205,6 +2205,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 	}, 400);
 
 	let requestHeaders;
+	let responseBodyIsIncluded = true;
 
 	try {
 		const request = new Request(req);
@@ -2213,11 +2214,12 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 		const path = request.getPath();
 		const pathParams = {};
 		requestHeaders = request.getHeaders();
+		responseBodyIsIncluded = method !== 'HEAD';
 
 		let routeHandler = routes;
 		let handleOptions = false;
 
-		const staticFileOrDirectory = method === 'GET' ? staticFileDirectories.find(x => x.urlPath === path || path.startsWith(x.urlPath + '/')) : null;
+		const staticFileOrDirectory = method === 'GET' || !responseBodyIsIncluded ? staticFileDirectories.find(x => x.urlPath === path || path.startsWith(x.urlPath + '/')) : null;
 
 		if (staticFileOrDirectory) {
 			routeHandler = () => {
@@ -2280,6 +2282,8 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 			if (method === 'OPTIONS' && typeof routeHandler?.[`/${method}/`] !== 'function') {
 				handleOptions = true;
 				routeHandler = routeHandler?.[`/${requestHeaders?.['access-control-request-method']}/`.toUpperCase()];
+			} else if (!responseBodyIsIncluded && typeof routeHandler?.[`/${method}/`] !== 'function') {
+				routeHandler = routeHandler?.[`/GET/`];
 			} else {
 				routeHandler = routeHandler?.[`/${method}/`];
 			}
@@ -2315,7 +2319,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 	}
 
 	try {
-		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), response.getBody(requestHeaders), false]);
+		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), responseBodyIsIncluded ? response.getBody(requestHeaders): '', false]);
 	} catch (error) {
 		safePrint(error, true);
 
@@ -2323,6 +2327,6 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 			message: 'Something went wrong'
 		}, 500);
 
-		return [response.getCode(), response.getHeaders(), response.getBody(), false];
+		return [response.getCode(), response.getHeaders(), responseBodyIsIncluded ? response.getBody() : '', false];
 	}
 }

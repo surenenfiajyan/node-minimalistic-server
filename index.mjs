@@ -1590,6 +1590,8 @@ export class FileResponse extends Response {
 	#makeNotFoundResponse = null;
 	#urlPathForDirectory = null;
 
+	#blocked = false;
+
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
 		this.#filePath = filePath;
@@ -1756,6 +1758,10 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 		let counter = 0;
 
 		for (const file of files) {
+			if (this.#blocked) {
+				break;
+			}
+
 			if (counter === 100) {
 				await new Promise(resolve => setTimeout(resolve, 50));
 			}
@@ -1786,7 +1792,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 
 			filehandle = await currentFsPromiseModule.open(this.#filePath, 'r');
 
-			for (let offset = 0; offset < requestedSize; offset += this.#maxChunkSize) {
+			for (let offset = 0; offset < requestedSize && !this.#blocked; offset += this.#maxChunkSize) {
 				const size = Math.min(this.#maxChunkSize, requestedSize - offset);
 				const chunk = await filehandle.read(Buffer.alloc(size), 0, size, offset + requestedPosition);
 				yield chunk.buffer;
@@ -1802,6 +1808,10 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 				let filehandle;
 
 				try {
+					if (this.#blocked) {
+						throw new Error(`${this.#filePath} is blocked`);
+					}
+
 					filehandle = await currentFsPromiseModule.open(this.#filePath, 'r');
 					const stat = await filehandle.stat();
 					const size = stat.size;
@@ -1856,6 +1866,15 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 		}
 
 		return this.#dataPromise;
+	}
+
+	block() {
+		this.#blocked = true;
+		this.#dataPromise = null;
+	}
+
+	isBlocked() {
+		return this.#blocked;
 	}
 }
 
@@ -2210,10 +2229,29 @@ function wrapInResponseClass(response) {
 const staticCache = new Map();
 
 export function clearStaticCache(path = null) {
+	invalidateStaticCache(path);
+}
+
+export function blockStaticCache(path = null) {
+	invalidateStaticCache(path, false);
+}
+
+function invalidateStaticCache(path = null, clear = true) {
 	if (path === null) {
-		staticCache.clear();
+		for (const v of staticCache.values()) {
+			v.block();
+		}
+
+		if (clear) {
+			staticCache.clear();
+		}
 	} else {
-		staticCache.delete(path);
+		path = `${path}`.split('/').filter(x => x).join('/');
+		staticCache.get(path)?.block();
+
+		if (clear) {
+			staticCache.delete(path);
+		}
 	}
 }
 
@@ -2262,9 +2300,11 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 					staticCache.set(filePath, resp);
 
 					if (staticCache.size > 500) {
-						for (const k of staticCache.keys()) {
-							staticCache.delete(k);
-							break;
+						for (const [k, v] of staticCache.entries()) {
+							if (!v.isBlocked()) {
+								staticCache.delete(k);
+								break;
+							}
 						}
 					}
 				}

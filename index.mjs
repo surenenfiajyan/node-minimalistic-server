@@ -1661,6 +1661,15 @@ export class FileResponse extends Response {
 		this.#dataPromise = null;
 	}
 
+	#isStreamableFileFormat(isDirectory = false) {
+		if (isDirectory) {
+			return false;
+		}
+
+		const extension = this.#filePath?.toLowerCase().split('.').at(-1) ?? '';
+		return !!mimeTypes[extension]?.match(/^(audio|video)\//);
+	}
+
 	async #getFragmentRequest(headers) {
 		let result = this.#fragmentRequestMap.get(headers);
 
@@ -1795,7 +1804,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 					const stat = await filehandle.stat();
 					const size = stat.size;
 					const readAsDirectory = stat.isDirectory() && this.#urlPathForDirectory !== null;
-					const body = size > this.#maxChunkSize ? (fragmentRequest => this.#getBodyStream(fragmentRequest)) : (readAsDirectory ? (() => this.#getDirectoryStream()) : await filehandle.readFile());
+					const body = size > this.#maxChunkSize || this.#isStreamableFileFormat(readAsDirectory) ? (fragmentRequest => this.#getBodyStream(fragmentRequest)) : (readAsDirectory ? (() => this.#getDirectoryStream()) : await filehandle.readFile());
 
 					resolve({
 						code: this.#code,

@@ -2247,6 +2247,11 @@ function invalidateStaticCache(path = null, clear = true) {
 		}
 	} else {
 		path = `${path}`.split('/').filter(x => x).join('/');
+
+		if (!clear && !staticCache.has(path)) {
+			staticCache.set(path, new FileResponse(path));
+		}
+
 		staticCache.get(path)?.block();
 
 		if (clear) {

@@ -1616,7 +1616,7 @@ export class FileResponse extends Response {
 		if (requestedFragment) {
 			return {
 				...data.headers,
-				'Accept-Ranges':'bytes',
+				'Accept-Ranges': 'bytes',
 				'Content-Range': `bytes ${requestedFragment.offset}-${requestedFragment.offset + requestedFragment.size - 1}/${data.size}`,
 				'Content-Length': `${requestedFragment.size}`,
 				'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -1862,6 +1862,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 export class JsonResponse extends Response {
 	#object;
 	#code;
+	#cachedBuffer = null;
 
 	constructor(object = {}, code = 200, cookies = null) {
 		super();
@@ -1875,11 +1876,18 @@ export class JsonResponse extends Response {
 	}
 
 	getHeaders() {
-		return this.getMergedWithOtherHeaders({ 'Content-Type': 'application/json' });
+		return this.getMergedWithOtherHeaders({
+			'Content-Type': 'application/json',
+			'Content-Length': `${this.getBody().length}`,
+		});
 	}
 
 	getBody() {
-		return JSON.stringify(this.#object);
+		if (!this.#cachedBuffer) {
+			this.#cachedBuffer = Buffer.from(JSON.stringify(this.#object), 'utf8');
+		}
+
+		return this.#cachedBuffer;
 	}
 
 	getObject() {
@@ -1887,6 +1895,7 @@ export class JsonResponse extends Response {
 	}
 
 	setObject(object) {
+		this.#cachedBuffer = null;
 		this.#object = object;
 	}
 }
@@ -1894,6 +1903,7 @@ export class JsonResponse extends Response {
 export class HTMLResponse extends Response {
 	#string;
 	#code;
+	#cachedBuffer = null;
 
 	constructor(string = '', code = 200, cookies = null) {
 		super();
@@ -1907,11 +1917,18 @@ export class HTMLResponse extends Response {
 	}
 
 	getHeaders() {
-		return this.getMergedWithOtherHeaders({ 'Content-Type': 'text/html; charset=utf-8' });
+		return this.getMergedWithOtherHeaders({
+			'Content-Type': 'text/html; charset=utf-8',
+			'Content-Length': `${this.getBody().length}`,
+		});
 	}
 
 	getBody() {
-		return this.#string;
+		if (!this.#cachedBuffer) {
+			this.#cachedBuffer = Buffer.from(this.#string, 'utf8');
+		}
+
+		return this.#cachedBuffer;
 	}
 
 	getString() {
@@ -1919,6 +1936,7 @@ export class HTMLResponse extends Response {
 	}
 
 	setString(string) {
+		this.#cachedBuffer = null;
 		this.#string = string;
 	}
 }
@@ -2319,7 +2337,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 	}
 
 	try {
-		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), responseBodyIsIncluded ? response.getBody(requestHeaders): '', false]);
+		return await Promise.all([response.getCode(requestHeaders), response.getHeaders(requestHeaders), responseBodyIsIncluded ? response.getBody(requestHeaders) : '', false]);
 	} catch (error) {
 		safePrint(error, true);
 

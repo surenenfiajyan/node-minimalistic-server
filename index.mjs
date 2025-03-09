@@ -1585,7 +1585,7 @@ export class FileResponse extends Response {
 	#dataPromise = null;
 
 	#maxChunkSize = 4 * 1024 * 1024;
-	#defaultfragmentSize = 256 * 1024;
+	#maxFragmentSize = 16 * 1024 * 1024 * 1024;
 	#fragmentRequestMap = new WeakMap();
 	#makeNotFoundResponse = null;
 	#urlPathForDirectory = null;
@@ -1714,7 +1714,7 @@ export class FileResponse extends Response {
 				offset = data.size - 1;
 			}
 
-			let size = (numbers[1] ?? (this.#defaultfragmentSize - 1 + offset)) - offset + 1;
+			let size = (numbers[1] ?? (this.#maxFragmentSize - 1 + offset)) - offset + 1;
 
 			if (size < 0) {
 				size = 0;
@@ -1789,11 +1789,12 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 		try {
 			const requestedPosition = fragmentRequest?.offset ?? 0;
 			const requestedSize = fragmentRequest?.size ?? data.size;
+			const maxChunkSize = fragmentRequest ? 256 * 1024 : this.#maxChunkSize;
 
 			filehandle = await currentFsPromiseModule.open(this.#filePath, 'r');
 
-			for (let offset = 0; offset < requestedSize && !this.#blocked; offset += this.#maxChunkSize) {
-				const size = Math.min(this.#maxChunkSize, requestedSize - offset);
+			for (let offset = 0; offset < requestedSize && !this.#blocked; offset += maxChunkSize) {
+				const size = Math.min(maxChunkSize, requestedSize - offset);
 				const chunk = await filehandle.read(Buffer.alloc(size), 0, size, offset + requestedPosition);
 				yield chunk.buffer;
 			}

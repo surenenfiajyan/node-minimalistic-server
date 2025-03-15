@@ -3,6 +3,8 @@ import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
 import * as tls from "node:tls";
 import * as nodeCrypto from "node:crypto";
+import { isTypedArray } from 'node:util/types';
+import { inspect } from 'node:util';
 
 const servers = new Map();
 const keepAliveTimeout = 20000;
@@ -1403,6 +1405,14 @@ export class Request {
 	#writeIntoWebSocket(data, isPong = false) {
 		if (this.#isWebSocketClosed || !this.#webSocketData) {
 			return;
+		}
+
+		if (ArrayBuffer.isView(data)) {
+			data = data.buffer;
+		}
+
+		if (typeof data !== 'string' && !(data instanceof Array || data instanceof Buffer || data instanceof ArrayBuffer)) {
+			data = `${data}`;
 		}
 
 		const isString = typeof data === 'string';

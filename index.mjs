@@ -1416,7 +1416,7 @@ export class Request {
 		}
 
 		const isString = typeof data === 'string';
-		const buffer = data instanceof Buffer ? buffer : (isString ? Buffer.from(data, 'utf-8') : Buffer.from(data));
+		const buffer = data instanceof Buffer ? data : (isString ? Buffer.from(data, 'utf-8') : Buffer.from(data));
 		const length = buffer.length;
 
 		let payloadLength = [length];

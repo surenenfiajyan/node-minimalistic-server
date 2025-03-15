@@ -3,8 +3,6 @@ import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
 import * as tls from "node:tls";
 import * as nodeCrypto from "node:crypto";
-import { isTypedArray } from 'node:util/types';
-import { inspect } from 'node:util';
 
 const servers = new Map();
 const keepAliveTimeout = 20000;

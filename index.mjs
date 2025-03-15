@@ -1407,7 +1407,7 @@ export class Request {
 			return;
 		}
 
-		if (ArrayBuffer.isView(data)) {
+		if (ArrayBuffer.isView(data) && !(data instanceof Buffer)) {
 			data = data.buffer;
 		}
 

@@ -823,6 +823,10 @@ export class Request {
 		return this.#headers;
 	}
 
+	getIp() {
+		return this.#request.socket.remoteAddress;
+	}
+
 	getPort() {
 		return this.#request.socket.address().port;
 	}

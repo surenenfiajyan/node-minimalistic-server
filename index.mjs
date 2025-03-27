@@ -2084,11 +2084,21 @@ export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null
 }
 
 export function escapeHtml(htmlStr) {
-	return htmlStr?.toString().replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;") ?? '';
+	return htmlStr?.toString()
+		.replace(/&/gm, "&amp;")
+		.replace(/</gm, "&lt;")
+		.replace(/>/gm, "&gt;")
+		.replace(/"/gm, "&quot;")
+		.replace(/'/gm, "&#39;") ?? '';
+}
+
+export function unescapeHtml(htmlStr) {
+	return htmlStr?.toString()
+		.replace(/&amp;/gm, "&")
+		.replace(/&lt;/gm, "<")
+		.replace(/&gt;/gm, ">")
+		.replace(/&quot;/gm, '"')
+		.replace(/&#39;/gm, "'") ?? '';
 }
 
 export function unserve(port = 80) {

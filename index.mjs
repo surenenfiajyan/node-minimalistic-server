@@ -708,7 +708,7 @@ const mimeTypes = {
 	"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	"xltm": "application/vnd.ms-excel.template.macroenabled.12",
 	"xltx": "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
-	"xml": "application/rss+xml",
+	"xml": "application/xml",
 	"xo": "application/vnd.olpc-sugar",
 	"xop": "application/xop+xml",
 	"xpi": "application/x-xpinstall",
@@ -813,6 +813,10 @@ export class Request {
 		url.searchParams.forEach((v, k) => {
 			this.#queryParams[k] = v;
 		});
+	}
+
+	isAlive() {
+		return this.#request.socket.closed || this.#request.socket.destroyed;
 	}
 
 	getMethod() {

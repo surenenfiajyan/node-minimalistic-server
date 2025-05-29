@@ -2330,7 +2330,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 					if (staticFileOrDirectory.maxAgeInSeconds > 0) {
 						resp.addCustomHeaders({
-							'Cache-Control': `public, max-age=${maxAgeInSeconds}`,
+							'Cache-Control': `public, max-age=${staticFileOrDirectory.maxAgeInSeconds}`,
 						});
 					}
 

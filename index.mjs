@@ -2118,23 +2118,27 @@ function normalizeStaticFileDirectories(staticFileDirectoryOrDirectories) {
 		}
 
 		staticFileDirectoryOrDirectories = staticFileDirectoryOrDirectories.filter(x => x !== null && typeof x === 'object' || typeof x === 'string').map(x => {
-			let serverFilePath = '', urlPath = '', showWholeDirectory = false;;
+			let serverFilePath = '', urlPath = '', showWholeDirectory = false, maxAgeInSeconds = -1;
+			const defaultMaxAge = 5 * 24 * 60 * 60;
 
 			if (typeof x === 'string') {
 				serverFilePath = urlPath = x;
 				showWholeDirectory = false;
+				maxAgeInSeconds = defaultMaxAge;
 			} else {
-				({ serverFilePath, urlPath, showWholeDirectory } = x);
+				({ serverFilePath, urlPath, showWholeDirectory, maxAgeInSeconds } = x);
 			}
 
 			urlPath = `${urlPath}`.split('/').filter(x => x).join('/');
 			serverFilePath = `${serverFilePath}`.split('/').filter(x => x).join('/');
 			showWholeDirectory = !!showWholeDirectory;
+			maxAgeInSeconds = Math.floor(+(maxAgeInSeconds ?? defaultMaxAge));
 
 			return {
 				urlPath,
 				serverFilePath,
 				showWholeDirectory,
+				maxAgeInSeconds,
 			};
 		});
 	} else {
@@ -2323,9 +2327,12 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 				if (!resp) {
 					resp = new FileResponse(filePath);
-					resp.addCustomHeaders({
-						'Cache-Control': 'public, max-age=432000',
-					});
+
+					if (staticFileOrDirectory.maxAgeInSeconds > 0) {
+						resp.addCustomHeaders({
+							'Cache-Control': `public, max-age=${maxAgeInSeconds}`,
+						});
+					}
 
 					if (handleNotFoundError) {
 						resp.setNotFoundErrorCustomResponseHandler(() => handleNotFoundError(request));

@@ -729,6 +729,7 @@ const mimeTypes = {
 	"zip": "application/zip",
 	"zir": "application/vnd.zul",
 	"zmm": "application/vnd.handheld-entertainment+xml",
+	__proto__: null,
 };
 
 export function getServerFsPromiseModule() {
@@ -805,13 +806,13 @@ export class Request {
 		this.#method = request.method.toUpperCase();
 
 		for (const k in request.headers) {
-			this.#headers[k.toLowerCase()] = request.headers[k];
+			Object.defineProperty(this.#headers, k.toLowerCase(), { value: request.headers[k] });
 		}
 
 		this.#path = url.pathname.split('/').filter(x => x).join('/');
 
 		url.searchParams.forEach((v, k) => {
-			this.#queryParams[k] = v;
+			Object.defineProperty(this.#queryParams, k, { value: v });
 		});
 	}
 
@@ -989,7 +990,7 @@ export class Request {
 							parent[index] = nextParent;
 						}
 					} else if (!(parent instanceof Array) && !curFragment.match(/^-?\d+$/gm)) {
-						parent[curFragment] = nextParent;
+						Object.defineProperty(parent, curFragment, { value: nextFragment });
 					} else {
 						break;
 					}
@@ -1091,7 +1092,7 @@ export class Request {
 			}
 
 			if (name in data && !Array.isArray(data[name])) {
-				data[name] = [data[name]];
+				Object.defineProperty(data, name, { value: [data[name]] });
 			}
 
 			if (Array.isArray(data[name])) {
@@ -1100,7 +1101,7 @@ export class Request {
 				}
 
 			} else {
-				data[name] = value;
+				Object.defineProperty(data, name, { value });
 			}
 		}
 
@@ -2239,7 +2240,7 @@ function normalizeRoutes(routes, handleServerError) {
 
 		for (const fragment of split) {
 			if (!parent[fragment]) {
-				parent[fragment] = {};
+				parent[fragment] = { __proto__: null };
 			}
 
 			parent = parent[fragment];
@@ -2367,7 +2368,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 				if (!newRouteHandler) {
 					for (let k in routeHandler) {
 						if (k.match(/^{\w+}$/gm)) {
-							pathParams[k.replace(/[{}]/gm, '')] = decodeURIComponent(fragment);
+							Object.defineProperty(pathParams, k.replace(/[{}]/gm, ''), { value: decodeURIComponent(fragment) });
 							newRouteHandler = routeHandler[k];
 							break;
 						}

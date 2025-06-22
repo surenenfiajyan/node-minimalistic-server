@@ -741,6 +741,14 @@ export function setServerFsPromiseModule(fsPromiseModule) {
 	clearStaticCache();
 }
 
+export function getExtension(fileNameOrPath) {
+	return fileNameOrPath?.toLowerCase().split('.').at(-1) ?? '';
+}
+
+export function getContentTypeByExtension(fileNameOrPath) {
+	return mimeTypes[getExtension(fileNameOrPath)] ?? 'application/octet-stream';
+}
+
 export class UploadedFile {
 	#content;
 	#contentType;
@@ -761,11 +769,11 @@ export class UploadedFile {
 	}
 
 	getExtension() {
-		return this.#fileName?.toLowerCase().split('.').at(-1) ?? '';
+		return getExtension(this.#fileName);
 	}
 
 	getContentTypeByExtension() {
-		return mimeTypes[this.getExtension()] ?? 'application/octet-stream';
+		return getContentTypeByExtension(this.#fileName);
 	}
 
 	getFileName() {

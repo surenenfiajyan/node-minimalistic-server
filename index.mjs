@@ -9,6 +9,19 @@ const keepAliveTimeout = 20000;
 
 let currentFsPromiseModule = fs;
 
+function setObjectProperty(object, name, value, enumerable = true, writable = true, configurable = true) {
+	Object.defineProperty(
+		object,
+		name,
+		{
+			value,
+			enumerable,
+			writable,
+			configurable,
+		},
+	)
+}
+
 function safePrint(data, isError = false) {
 	try {
 		if (isError) {
@@ -814,13 +827,13 @@ export class Request {
 		this.#method = request.method.toUpperCase();
 
 		for (const k in request.headers) {
-			Object.defineProperty(this.#headers, k.toLowerCase(), { value: request.headers[k] });
+			setObjectProperty(this.#headers, k.toLowerCase(), request.headers[k]);
 		}
 
 		this.#path = url.pathname.split('/').filter(x => x).join('/');
 
 		url.searchParams.forEach((v, k) => {
-			Object.defineProperty(this.#queryParams, k, { value: v });
+			setObjectProperty(this.#queryParams, k, v);
 		});
 	}
 
@@ -998,7 +1011,7 @@ export class Request {
 							parent[index] = nextParent;
 						}
 					} else if (!(parent instanceof Array) && !curFragment.match(/^-?\d+$/gm)) {
-						Object.defineProperty(parent, curFragment, { value: nextFragment });
+						setObjectProperty(parent, curFragment, nextFragment);
 					} else {
 						break;
 					}
@@ -1100,7 +1113,7 @@ export class Request {
 			}
 
 			if (name in data && !Array.isArray(data[name])) {
-				Object.defineProperty(data, name, { value: [data[name]] });
+				setObjectProperty(data, name,  [data[name]]);
 			}
 
 			if (Array.isArray(data[name])) {
@@ -1109,7 +1122,7 @@ export class Request {
 				}
 
 			} else {
-				Object.defineProperty(data, name, { value });
+				setObjectProperty(data, name, value);
 			}
 		}
 
@@ -2376,7 +2389,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 				if (!newRouteHandler) {
 					for (let k in routeHandler) {
 						if (k.match(/^{\w+}$/gm)) {
-							Object.defineProperty(pathParams, k.replace(/[{}]/gm, ''), { value: decodeURIComponent(fragment) });
+							setObjectProperty(pathParams, k.replace(/[{}]/gm, ''), decodeURIComponent(fragment));
 							newRouteHandler = routeHandler[k];
 							break;
 						}

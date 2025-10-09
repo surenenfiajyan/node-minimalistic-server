@@ -1011,7 +1011,7 @@ export class Request {
 							parent[index] = nextParent;
 						}
 					} else if (!(parent instanceof Array) && !curFragment.match(/^-?\d+$/gm)) {
-						setObjectProperty(parent, curFragment, nextFragment);
+						setObjectProperty(parent, curFragment, nextParent);
 					} else {
 						break;
 					}

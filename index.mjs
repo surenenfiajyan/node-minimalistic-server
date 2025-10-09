@@ -1113,7 +1113,7 @@ export class Request {
 			}
 
 			if (name in data && !Array.isArray(data[name])) {
-				setObjectProperty(data, name,  [data[name]]);
+				setObjectProperty(data, name, [data[name]]);
 			}
 
 			if (Array.isArray(data[name])) {

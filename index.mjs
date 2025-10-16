@@ -2133,6 +2133,59 @@ export function unserve(port = 80) {
 	servers.delete(port);
 }
 
+function wrapInMiddlewares(callback, preMiddlewares = [], postMiddlewares = [], handleServerError = null) {
+	let resultCallback = async (request, handleOptions = false) => {
+		let response;
+
+		try {
+			for (const pre of preMiddlewares) {
+				const req = await pre(request);
+
+				if (req instanceof Request) {
+					request = req;
+				}
+			}
+
+			response = wrapInResponseClass(handleOptions ? new CustomResponse(Buffer.from(''), 200, { 'Content-Type': null }) : await callback(request));
+		} catch (error) {
+			if (error instanceof Response) {
+				response = error;
+			} else {
+				throw error;
+			}
+		}
+
+		for (const post of postMiddlewares) {
+			const res = await post(request, response);
+
+			if (res !== undefined) {
+				response = wrapInResponseClass(res);
+			}
+		}
+
+		return response;
+	};
+
+	if (handleServerError) {
+		const tempCallback = resultCallback;
+
+		resultCallback = async (request, handleOptions = false) => {
+			try {
+				return await tempCallback(request, handleOptions);
+			} catch (error) {
+				if (error instanceof Response) {
+					throw error;
+				}
+
+				safePrint(error);
+				return wrapInResponseClass(await handleServerError(request, error));
+			}
+		};
+	}
+
+	return resultCallback;
+}
+
 function normalizeStaticFileDirectories(staticFileDirectoryOrDirectories) {
 	if (staticFileDirectoryOrDirectories !== null && staticFileDirectoryOrDirectories !== undefined) {
 		if (!Array.isArray(staticFileDirectoryOrDirectories)) {
@@ -2140,27 +2193,33 @@ function normalizeStaticFileDirectories(staticFileDirectoryOrDirectories) {
 		}
 
 		staticFileDirectoryOrDirectories = staticFileDirectoryOrDirectories.filter(x => x !== null && typeof x === 'object' || typeof x === 'string').map(x => {
-			let serverFilePath = '', urlPath = '', showWholeDirectory = false, maxAgeInSeconds = -1;
+			let serverFilePath = '', urlPath = '', showWholeDirectory = false, maxAgeInSeconds = -1, preMiddlewares = [], postMiddlewares = [];
 			const defaultMaxAge = 5 * 24 * 60 * 60;
 
 			if (typeof x === 'string') {
 				serverFilePath = urlPath = x;
 				showWholeDirectory = false;
 				maxAgeInSeconds = defaultMaxAge;
+				preMiddlewares = [];
+				postMiddlewares = [];
 			} else {
-				({ serverFilePath, urlPath, showWholeDirectory, maxAgeInSeconds } = x);
+				({ serverFilePath, urlPath, showWholeDirectory, maxAgeInSeconds, preMiddlewares, postMiddlewares } = x);
 			}
 
 			urlPath = `${urlPath}`.split('/').filter(x => x).join('/');
 			serverFilePath = `${serverFilePath}`.split('/').filter(x => x).join('/');
 			showWholeDirectory = !!showWholeDirectory;
 			maxAgeInSeconds = Math.floor(+(maxAgeInSeconds ?? defaultMaxAge));
+			preMiddlewares = Array.isArray(preMiddlewares) ? preMiddlewares.filter(x => typeof x === 'function') : [];
+			postMiddlewares = Array.isArray(postMiddlewares) ? postMiddlewares.filter(x => typeof x === 'function') : [];
 
 			return {
 				urlPath,
 				serverFilePath,
 				showWholeDirectory,
 				maxAgeInSeconds,
+				preMiddlewares,
+				postMiddlewares,
 			};
 		});
 	} else {
@@ -2192,54 +2251,7 @@ function normalizeRoutes(routes, handleServerError) {
 				flattenRecursively(root[prop], newPath, preMiddlewares, postMiddlewares);
 			}
 		} else if (typeof root === 'function') {
-			flatten[path] = async (request, handleOptions = false) => {
-				let response;
-
-				try {
-					for (const pre of preMiddlewares) {
-						const req = await pre(request);
-
-						if (req instanceof Request) {
-							request = req;
-						}
-					}
-
-					response = wrapInResponseClass(handleOptions ? new CustomResponse(Buffer.from(''), 200, { 'Content-Type': null }) : await root(request));
-				} catch (error) {
-					if (error instanceof Response) {
-						response = error;
-					} else {
-						throw error;
-					}
-				}
-
-				for (const post of postMiddlewares) {
-					const res = await post(request, response);
-
-					if (res !== undefined) {
-						response = wrapInResponseClass(res);
-					}
-				}
-
-				return response;
-			};
-
-			if (handleServerError) {
-				const callback = flatten[path];
-
-				flatten[path] = async (request, handleOptions = false) => {
-					try {
-						return await callback(request, handleOptions);
-					} catch (error) {
-						if (error instanceof Response) {
-							throw error;
-						}
-
-						safePrint(error);
-						return wrapInResponseClass(await handleServerError(request, error));
-					}
-				};
-			}
+			flatten[path] = wrapInMiddlewares(root, preMiddlewares, postMiddlewares, handleServerError);
 		}
 	}
 
@@ -2378,6 +2390,8 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 				return resp;
 			};
+
+			routeHandler = wrapInMiddlewares(routeHandler, staticFileOrDirectory.preMiddlewares, staticFileOrDirectory.postMiddlewares);
 		} else {
 			for (const fragment of path.split('/')) {
 				if (!fragment) {

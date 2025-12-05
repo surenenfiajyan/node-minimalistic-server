@@ -36,6 +36,70 @@ function safePrint(data, isError = false) {
 	}
 }
 
+const escapeHtmlMap = {
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	'"': "&quot;",
+	"'": "&#39;",
+}
+
+const unescapeHtmlMap = {
+	"&nbsp;": "\u00A0",
+	"&lt;": "<",
+	"&gt;": ">",
+	"&amp;": "&",
+	"&quot;": "\"",
+	"&apos;": "'",
+	"&cent;": "¢",
+	"&pound;": "£",
+	"&yen;": "¥",
+	"&euro;": "€",
+	"&copy;": "©",
+	"&reg;": "®",
+	"&trade;": "™",
+
+	"&hellip;": "…",
+	"&ndash;": "–",
+	"&mdash;": "—",
+	"&lsquo;": "‘",
+	"&rsquo;": "’",
+	"&ldquo;": "“",
+	"&rdquo;": "”",
+	"&laquo;": "«",
+	"&raquo;": "»",
+
+	"&times;": "×",
+	"&divide;": "÷",
+	"&plusmn;": "±",
+	"&minus;": "−",
+	"&sup2;": "²",
+	"&sup3;": "³",
+	"&frac12;": "½",
+	"&frac14;": "¼",
+	"&frac34;": "¾",
+
+	"&deg;": "°",
+	"&micro;": "µ",
+	"&para;": "¶",
+	"&sect;": "§",
+	"&middot;": "·",
+	"&bull;": "•",
+
+	"&alpha;": "α",
+	"&beta;": "β",
+	"&gamma;": "γ",
+	"&pi;": "π",
+	"&sigma;": "σ",
+	"&omega;": "ω",
+	"&Alpha;": "Α",
+	"&Beta;": "Β",
+	"&Gamma;": "Γ",
+	"&Pi;": "Π",
+	"&Sigma;": "Σ",
+	"&Omega;": "Ω"
+}
+
 const mimeTypes = {
 	"123": "application/vnd.lotus-1-2-3",
 	"3dml": "text/vnd.in3d.3dml",
@@ -2105,22 +2169,13 @@ export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null
 
 }
 
-export function escapeHtml(htmlStr) {
-	return htmlStr?.toString()
-		.replace(/&/gm, "&amp;")
-		.replace(/</gm, "&lt;")
-		.replace(/>/gm, "&gt;")
-		.replace(/"/gm, "&quot;")
-		.replace(/'/gm, "&#39;") ?? '';
+export function escapeHtml(str) {
+	return str?.toString().replace(/[&<>"']/gm, (c) => escapeHtmlMap[c]) ?? '';
 }
 
 export function unescapeHtml(htmlStr) {
 	return htmlStr?.toString()
-		.replace(/&amp;/gm, "&")
-		.replace(/&lt;/gm, "<")
-		.replace(/&gt;/gm, ">")
-		.replace(/&quot;/gm, '"')
-		.replace(/&#39;/gm, "'") ?? '';
+		.replace(/&(?:#(\d+|x[\dA-Fa-f]+)|([^;]+));/gm, (entity, digits, entityName) => unescapeHtmlMap[entity] ?? entityName ?? String.fromCharCode("0" + digits));
 }
 
 export function unserve(port = 80) {

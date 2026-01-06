@@ -2306,13 +2306,13 @@ function normalizeRoutes(routes, handleServerError) {
 				flattenRecursively(root[prop], newPath, preMiddlewares, postMiddlewares);
 			}
 		} else if (typeof root === 'function') {
-			flatten[path] = wrapInMiddlewares(root, preMiddlewares, postMiddlewares, handleServerError);
+			setObjectProperty(flatten, path, wrapInMiddlewares(root, preMiddlewares, postMiddlewares, handleServerError));
 		}
 	}
 
 	flattenRecursively(routes);
 
-	const result = {};
+	const result = Object.create(null);
 
 	for (const route in flatten) {
 		const split = route.split('/').filter(x => x);
@@ -2328,13 +2328,13 @@ function normalizeRoutes(routes, handleServerError) {
 
 		for (const fragment of split) {
 			if (!parent[fragment]) {
-				parent[fragment] = { __proto__: null };
+				setObjectProperty(parent, fragment, Object.create(null));
 			}
 
 			parent = parent[fragment];
 		}
 
-		parent[`/${method}/`] = flatten[route];
+		setObjectProperty(parent, `/${method}/`, flatten[route]);
 	}
 
 	return result;

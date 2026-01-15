@@ -1630,9 +1630,11 @@ export class Response {
 				cookieStrings.push(cookieString);
 			}
 
-			headers = {
-				...headers,
-				'Set-Cookie': cookieStrings,
+			if (cookieStrings.length) {
+				headers = {
+					...headers,
+					'Set-Cookie': cookieStrings,
+				}
 			}
 		}
 
@@ -1699,6 +1701,7 @@ export class FileResponse extends Response {
 	#urlPathForDirectory = null;
 
 	#blocked = false;
+	#proxiedResponse = null;
 
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
@@ -1709,6 +1712,10 @@ export class FileResponse extends Response {
 	}
 
 	async getCode(headers = null) {
+		if (this.#proxiedResponse) {
+			return await this.#proxiedResponse.code(headers);
+		}
+
 		const requestedFragment = await this.#getFragmentRequest(headers);
 		const data = await this.#retreiveData();
 
@@ -1720,6 +1727,11 @@ export class FileResponse extends Response {
 	}
 
 	async getHeaders(headers = null) {
+		if (this.#proxiedResponse) {
+			const resultingHeaders = await this.#proxiedResponse.getHeaders(headers);
+			return this.getMergedWithOtherHeaders(resultingHeaders);
+		}
+
 		const requestedFragment = await this.#getFragmentRequest(headers);
 		const data = await this.#retreiveData();
 
@@ -1744,6 +1756,10 @@ export class FileResponse extends Response {
 	}
 
 	async getBody(headers = null) {
+		if (this.#proxiedResponse) {
+			return await this.#proxiedResponse.getBody(headers);
+		}
+
 		const requestedFragment = await this.#getFragmentRequest(headers);
 		const data = await this.#retreiveData();
 
@@ -1754,23 +1770,29 @@ export class FileResponse extends Response {
 		return data.body;
 	}
 
+	getProxy() {
+		const proxy = new FileResponse(this.#filePath, this.#code, this.#contentType, this.getCookies());
+		proxy.#proxiedResponse = this;
+		return proxy;
+	}
+
 	getFilePath() {
 		return this.#filePath;
 	}
 
 	setFilePath(filePath) {
 		this.#filePath = filePath;
-		this.#dataPromise = null;
+		this.#dataPromise = this.#proxiedResponse = null;
 	}
 
 	setNotFoundErrorCustomResponseHandler(handler) {
 		this.#makeNotFoundResponse = handler;
-		this.#dataPromise = null;
+		this.#dataPromise = this.#proxiedResponse = null;
 	}
 
 	setUrlPathForDirectory(urlPathForDirectory) {
 		this.#urlPathForDirectory = urlPathForDirectory;
-		this.#dataPromise = null;
+		this.#dataPromise = this.#proxiedResponse = null;
 	}
 
 	#isStreamableFileFormat(isDirectory = false) {
@@ -1979,7 +2001,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 
 	block() {
 		this.#blocked = true;
-		this.#dataPromise = null;
+		this.#dataPromise = this.#proxiedResponse = null;
 	}
 
 	isBlocked() {
@@ -2443,7 +2465,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 					}
 				}
 
-				return resp;
+				return resp.getProxy();
 			};
 
 			routeHandler = wrapInMiddlewares(routeHandler, staticFileOrDirectory.preMiddlewares, staticFileOrDirectory.postMiddlewares);

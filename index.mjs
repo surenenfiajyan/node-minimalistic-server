@@ -1565,7 +1565,7 @@ export class Response {
 	}
 
 	setCookies(cookies) {
-		this.#cookies = cookies;
+		this.#cookies = { ...cookies };
 	}
 
 	addCookies(cookies) {

@@ -1713,7 +1713,7 @@ export class FileResponse extends Response {
 
 	async getCode(headers = null) {
 		if (this.#proxiedResponse) {
-			return await this.#proxiedResponse.code(headers);
+			return await this.#proxiedResponse.getCode(headers);
 		}
 
 		const requestedFragment = await this.#getFragmentRequest(headers);

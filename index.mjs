@@ -1883,22 +1883,22 @@ export class FileResponse extends Response {
 <body>
 ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 `;
-
-		const files = await currentFsPromiseModule.readdir(filePath);
+		const entries = await currentFsPromiseModule.readdir(filePath, { withFileTypes: true });
 		let counter = 0;
 
-		for (const file of files) {
+		for (const entry of entries) {
 			if (this.#blocked) {
 				break;
 			}
 
 			if (counter === 100) {
 				await new Promise(resolve => setTimeout(resolve, 50));
+				counter = 0;
 			}
 
 			++counter;
 
-			yield `<a href="/${urlPath}/${encodeURIComponent(file)}">${escapeHtml(file)}</a><br>`;
+			yield `<a${entry.isFile ? '' : ' target="_blank"'} href="/${urlPath}/${encodeURIComponent(entry.name)}">${escapeHtml(entry.name)}</a><br>`;
 		}
 
 

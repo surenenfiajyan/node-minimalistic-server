@@ -1898,7 +1898,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 
 			++counter;
 
-			yield `<a${entry.isFile ? '' : ' target="_blank"'} href="/${urlPath}/${encodeURIComponent(entry.name)}">${escapeHtml(entry.name)}</a><br>`;
+			yield `<a${entry.isFile() ? ' target="_blank"' : ''} href="/${urlPath}/${encodeURIComponent(entry.name)}">${escapeHtml(entry.name)}</a><br>`;
 		}
 
 

@@ -1809,67 +1809,68 @@ export class FileResponse extends Response {
 		return !!mimeTypes[extension]?.match(/^(audio|video)\//);
 	}
 
-	async #getFragmentRequest(headers) {
-		let result = this.#fragmentRequestMap.get(headers);
+	#getFragmentRequest(headers) {
+		let promise = this.#fragmentRequestMap.get(headers);
 
-		if (result === undefined && headers?.['range']) {
-			if (headers['range'].includes(',')) {
-				this.#fragmentRequestMap.set(headers, null);
-				return null;
+		if (promise === undefined && headers?.['range']) {
+			const getFragmentRequest = async () => {
+				if (headers['range'].includes(',')) {
+					return null;
+				}
+
+				const numbers = headers['range']
+					.trim()
+					.replace('bytes=', '')
+					.split(/\b\s*-\s*/gm)
+					.map(x => {
+						if (!x) {
+							return null;
+						}
+
+						x = +x;
+
+						if (!Number.isSafeInteger(x)) {
+							return null;
+						}
+
+						return x;
+					});
+
+				const data = await this.#retreiveData();
+
+				if (data.code < 200 || data.code > 299 || typeof data.body !== 'function') {
+					return null;
+				}
+
+				let offset = numbers[0] ?? 0;
+
+				if (offset < 0) {
+					offset = data.size + offset;
+				}
+
+				if (offset >= data.size) {
+					offset = data.size - 1;
+				}
+
+				let size = (numbers[1] ?? (this.#maxFragmentSize - 1 + offset)) - offset + 1;
+
+				if (size < 0) {
+					size = 0;
+				}
+
+				size = Math.min(size, data.size - offset);
+
+				return {
+					offset,
+					size,
+				};
 			}
 
-			const numbers = headers['range']
-				.trim()
-				.replace('bytes=', '')
-				.split(/\b\s*-\s*/gm)
-				.map(x => {
-					if (!x) {
-						return null;
-					}
-
-					x = +x;
-
-					if (!Number.isSafeInteger(x)) {
-						return null;
-					}
-
-					return x;
-				});
-
-			const data = await this.#retreiveData();
-
-			if (data.code < 200 || data.code > 299 || typeof data.body !== 'function') {
-				this.#fragmentRequestMap.set(headers, null);
-				return null;
-			}
-
-			let offset = numbers[0] ?? 0;
-
-			if (offset < 0) {
-				offset = data.size + offset;
-			}
-
-			if (offset >= data.size) {
-				offset = data.size - 1;
-			}
-
-			let size = (numbers[1] ?? (this.#maxFragmentSize - 1 + offset)) - offset + 1;
-
-			if (size < 0) {
-				size = 0;
-			}
-
-			size = Math.min(size, data.size - offset);
-
-			result = {
-				offset,
-				size,
-			};
-
-			this.#fragmentRequestMap.set(headers, result);
+			promise = getFragmentRequest();
+			this.#fragmentRequestMap.set(headers, promise);
 		}
 
-		return result ?? null;
+		return promise ?? null;
 	}
 
 	async * #getDirectoryStream() {

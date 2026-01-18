@@ -2,6 +2,7 @@ import * as http from 'node:http';
 import * as querystring from "node:querystring";
 import * as fs from "node:fs/promises";
 import * as tls from "node:tls";
+import * as net from "node:net";
 import * as nodeCrypto from "node:crypto";
 
 const servers = new Map();
@@ -881,10 +882,12 @@ export class Request {
 	#request;
 	#customData = null;
 	#webSocketData = null;
+	#heads = null;
 	#isWebSocketClosed = false;
 
-	constructor(request) {
+	constructor(request, heads = null) {
 		this.#request = request;
+		this.#heads = heads;
 
 		let url = new URL(`http://localhost${request.url}`);
 
@@ -902,7 +905,7 @@ export class Request {
 	}
 
 	isAlive() {
-		return this.#request.socket.closed || this.#request.socket.destroyed;
+		return !(this.#request.socket.writableEnded || this.#request.socket.destroyed);
 	}
 
 	getMethod() {
@@ -1289,10 +1292,12 @@ export class Request {
 			});
 
 			socket.on("error", (error) => {
+				safePrint(error);
 				resolve();
 			});
 
 			socket.on('timeout', (error) => {
+				safePrint(error);
 				resolve();
 			});
 		})
@@ -1352,7 +1357,7 @@ export class Request {
 			listeners: new Set(),
 			nextDataPromiseWithResolvers: null,
 			isManuallyClosed: false,
-			collectedData: [],
+			collectedData: this.#heads?.length ? [this.#heads] : [],
 		};
 
 		const guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -1361,8 +1366,8 @@ export class Request {
 		const validHandShakeKey = sha1.digest("base64");
 
 		const responseHeaders = [
-			"HTTP/1.1 101 Web Socket Protocols",
-			"Upgrade: WebSocket",
+			"HTTP/1.1 101 Switching Protocols",
+			"Upgrade: websocket",
 			"Connection: Upgrade",
 			`Sec-WebSocket-Accept: ${validHandShakeKey}`,
 			"\r\n",
@@ -1489,7 +1494,7 @@ export class Request {
 			if (this.#webSocketData.isManuallyClosed) {
 				await sendDataToAllListeners(null, 'end');
 			} else {
-				await sendDataToAllListeners(error, 'erorr');
+				await sendDataToAllListeners(error, 'error');
 			}
 		}
 	}
@@ -1820,11 +1825,11 @@ export class FileResponse extends Response {
 				.map(x => {
 					x = +x;
 
-					if (!x || isNaN(x) || x < Number.MIN_SAFE_INTEGER || x > Number.MAX_SAFE_INTEGER) {
+					if (!Number.isSafeInteger(x)) {
 						return null;
 					}
 
-					return Math.floor(x);
+					return x;
 				});
 
 			const data = await this.#retreiveData();
@@ -2134,9 +2139,9 @@ export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null
 		unserve(port);
 
 
-		const callback = async (req, res) => {
+		const callback = async (req, res, heads = null) => {
 			try {
-				const [code, headers, body, isHandledAsWebSocket] = await handleRequest(req, routes, staticFileDirectoryOrDirectories, handleNotFoundError);
+				const [code, headers, body, isHandledAsWebSocket] = await handleRequest(req, routes, staticFileDirectoryOrDirectories, handleNotFoundError, heads);
 
 				if (isHandledAsWebSocket || !(res instanceof http.ServerResponse)) {
 					return;
@@ -2146,25 +2151,37 @@ export function serve(routes, port = 80, staticFileDirectoryOrDirectories = null
 
 				if (typeof body === 'function') {
 					for await (const chunk of body()) {
-						if (res.closed || res.destroyed) {
+						if (res.writableEnded || res.destroyed) {
 							break;
 						}
 
 						res.write(chunk);
 						let waitTime = 0;
 
-						while (res.writableNeedDrain && !res.closed && !res.destroyed && waitTime < keepAliveTimeout) {
+						while (res.writableNeedDrain && !res.writableEnded && !res.destroyed && waitTime < keepAliveTimeout) {
 							await new Promise(resolve => setTimeout(resolve, 50));
 							waitTime += 50;
 						}
 					}
 				} else {
-					res.write(body);
+					res.end(body);
 				}
 			} catch (error) {
 				safePrint(error, true);
 			} finally {
-				res.end();
+				if (res instanceof net.Socket) {
+					if (!res.writableEnded) {
+						res.end();
+					}
+
+					await new Promise(resolve => setTimeout(resolve, 2000));
+
+					if (!res.destroyed) {
+						res.destroy();
+					}
+				} else if (res instanceof http.ServerResponse && !res.writableEnded && !res.destroyed) {
+					res.end();
+				}
 			}
 		};
 
@@ -2408,7 +2425,7 @@ function invalidateStaticCache(path = null, clear = true) {
 	}
 }
 
-async function handleRequest(req, routes, staticFileDirectories, handleNotFoundError) {
+async function handleRequest(req, routes, staticFileDirectories, handleNotFoundError, heads) {
 	let response = new JsonResponse({
 		message: 'Invalid data'
 	}, 400);
@@ -2417,7 +2434,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 	let responseBodyIsIncluded = true;
 
 	try {
-		const request = new Request(req);
+		const request = new Request(req, heads);
 
 		const method = request.getMethod();
 		const path = request.getPath();

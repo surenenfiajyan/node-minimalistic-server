@@ -1823,6 +1823,10 @@ export class FileResponse extends Response {
 				.replace('bytes=', '')
 				.split(/\b\s*-\s*/gm)
 				.map(x => {
+					if (!x) {
+						return null;
+					}
+
 					x = +x;
 
 					if (!Number.isSafeInteger(x)) {

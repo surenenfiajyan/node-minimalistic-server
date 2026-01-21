@@ -1707,6 +1707,7 @@ export class FileResponse extends Response {
 
 	#blocked = false;
 	#proxiedResponse = null;
+	#enableFragments = false;
 
 	constructor(filePath, code = 200, contentType = null, cookies = null) {
 		super();
@@ -1795,6 +1796,11 @@ export class FileResponse extends Response {
 		this.#dataPromise = this.#proxiedResponse = null;
 	}
 
+	enableFraments() {
+		this.#enableFragments = true;
+		this.#dataPromise = this.#proxiedResponse = null;
+	}
+
 	setUrlPathForDirectory(urlPathForDirectory) {
 		this.#urlPathForDirectory = urlPathForDirectory;
 		this.#dataPromise = this.#proxiedResponse = null;
@@ -1812,7 +1818,7 @@ export class FileResponse extends Response {
 	#getFragmentRequest(headers) {
 		let promise = this.#fragmentRequestMap.get(headers);
 
-		if (promise === undefined && headers?.['range']) {
+		if (promise === undefined && headers?.['range'] && this.#enableFragments) {
 			const getFragmentRequest = async () => {
 				if (headers['range'].includes(',')) {
 					return null;
@@ -2460,6 +2466,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 				if (!resp) {
 					resp = new FileResponse(filePath);
+					resp.enableFraments();
 
 					if (staticFileOrDirectory.maxAgeInSeconds > 0) {
 						resp.addCustomHeaders({

@@ -2499,39 +2499,63 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 			routeHandler = wrapInMiddlewares(routeHandler, staticFileOrDirectory.preMiddlewares, staticFileOrDirectory.postMiddlewares);
 		} else {
-			for (const fragment of path.split('/')) {
-				if (!fragment) {
-					break;
+			function getRouteHandler(fragments, root, methodPath, accumulatedPathParams) {
+				if (!fragments.at(0) || !root) {
+					return typeof root?.[methodPath] === 'function' ? root[methodPath] : null;
 				}
 
-				let newRouteHandler = routeHandler[fragment];
+				const fragment = fragments.shift();
+				let newRoot = root[fragment];
+				let result = null;
 
-				if (!newRouteHandler) {
-					for (let k in routeHandler) {
+				if (newRoot) {
+					result = getRouteHandler(fragments, newRoot, methodPath, accumulatedPathParams);
+				}
+
+				if (!result) {
+					for (let k in root) {
 						if (k.match(/^{\w+}$/gm)) {
-							setObjectProperty(pathParams, k.replace(/[{}]/gm, ''), decodeURIComponent(fragment));
-							newRouteHandler = routeHandler[k];
-							break;
+							newRoot = root[k];
+							result = getRouteHandler(fragments, newRoot, methodPath, accumulatedPathParams);
+
+							if (result) {
+								setObjectProperty(accumulatedPathParams, k.replace(/[{}]/gm, ''), decodeURIComponent(fragment));
+								break;
+							}
 						}
 					}
 				}
 
-				routeHandler = newRouteHandler;
+				fragments.unshift(fragment);
+				return result;
+			}
 
-				if (!routeHandler) {
-					break;
+			const fragments = path.split('/');
+			let accumulatedPathParams = {};
+			routeHandler = getRouteHandler(fragments, routes, `/${method}/`, accumulatedPathParams);
+
+			if (typeof routeHandler !== 'function') {
+				if (method === 'OPTIONS') {
+					handleOptions = true;
+					accumulatedPathParams = {};
+					routeHandler = getRouteHandler(
+						fragments,
+						routes,
+						`/${requestHeaders?.['access-control-request-method']}/`.toUpperCase(),
+						accumulatedPathParams,
+					);
+				} else if (!responseBodyIsIncluded) {
+					accumulatedPathParams = {};
+					routeHandler = getRouteHandler(
+						fragments,
+						routes,
+						`/GET/`,
+						accumulatedPathParams,
+					);
 				}
 			}
 
-
-			if (method === 'OPTIONS' && typeof routeHandler?.[`/${method}/`] !== 'function') {
-				handleOptions = true;
-				routeHandler = routeHandler?.[`/${requestHeaders?.['access-control-request-method']}/`.toUpperCase()];
-			} else if (!responseBodyIsIncluded && typeof routeHandler?.[`/${method}/`] !== 'function') {
-				routeHandler = routeHandler?.[`/GET/`];
-			} else {
-				routeHandler = routeHandler?.[`/${method}/`];
-			}
+			Object.assign(pathParams, accumulatedPathParams);
 		}
 
 		if (typeof routeHandler === 'function') {

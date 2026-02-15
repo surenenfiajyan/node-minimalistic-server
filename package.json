@@ -1,9 +1,9 @@
 {
   "name": "minimalistic-server",
-  "version": "0.0.66",
-  "engines" : { 
-    "npm" : ">=8.6.0",
-    "node" : ">=22.0.0"
+  "version": "0.0.67",
+  "engines": {
+    "npm": ">=8.6.0",
+    "node": ">=22.0.0"
   },
   "type": "module",
   "description": "Minimalistic server library for Node.js. It supports routing, middlewares, parsing common request bodies (JSON, form data, etc), static file serving.",

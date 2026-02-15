@@ -870,7 +870,7 @@ export class UploadedFile {
 export class Request {
 	#method;
 	#headers = {};
-	#path;
+	#path = '';
 	#queryParams = {};
 	#pathParams = {};
 
@@ -889,19 +889,23 @@ export class Request {
 		this.#request = request;
 		this.#heads = heads;
 
-		let url = new URL(`http://localhost${request.url}`);
-
 		this.#method = request.method.toUpperCase();
 
 		for (const k in request.headers) {
-			setObjectProperty(this.#headers, k.toLowerCase(), request.headers[k]);
+			setObjectProperty(this.#headers, k, request.headers[k]);
 		}
 
-		this.#path = url.pathname.split('/').filter(x => x).join('/');
+		try {
+			const url = new URL(`http://localhost${request.url}`);
 
-		url.searchParams.forEach((v, k) => {
-			setObjectProperty(this.#queryParams, k, v);
-		});
+			this.#path = url.pathname.split('/').filter(x => x).join('/');
+
+			url.searchParams.forEach((v, k) => {
+				setObjectProperty(this.#queryParams, k, v);
+			});
+		} catch (error) {
+			safePrint(error, true);
+		}
 	}
 
 	isAlive() {
@@ -1292,12 +1296,12 @@ export class Request {
 			});
 
 			socket.on("error", (error) => {
-				safePrint(error);
+				safePrint(error, true);
 				resolve();
 			});
 
 			socket.on('timeout', (error) => {
-				safePrint(error);
+				safePrint(error, true);
 				resolve();
 			});
 		})
@@ -2460,7 +2464,12 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 		if (staticFileOrDirectory) {
 			routeHandler = () => {
-				const filePath = decodeURI(path).replace(staticFileOrDirectory.urlPath, staticFileOrDirectory.serverFilePath);
+				const filePath = decodeURI(path)
+					.replace(staticFileOrDirectory.urlPath, staticFileOrDirectory.serverFilePath)
+					.replaceAll('\\', '/')
+					.split('/')
+					.filter(x => !x.match(/^\s*\.{0,2}\s*$/gs))
+					.join('/');
 
 				let resp = staticCache.get(filePath);
 

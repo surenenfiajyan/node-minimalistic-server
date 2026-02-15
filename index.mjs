@@ -23,6 +23,24 @@ function setObjectProperty(object, name, value, enumerable = true, writable = tr
 	)
 }
 
+function safeDecodeUri(str, defaultValue = '') {
+	try {
+		return decodeURI(str)
+	} catch (error) {
+		safePrint(error, true);
+		return defaultValue;
+	}
+}
+
+function safeDecodeUriComponent(str, defaultValue = '') {
+	try {
+		return decodeURIComponent(str)
+	} catch (error) {
+		safePrint(error, true);
+		return defaultValue;
+	}
+}
+
 function safePrint(data, isError = false) {
 	try {
 		if (isError) {
@@ -1161,8 +1179,8 @@ export class Request {
 
 			const info = body.toString('utf-8', position.start, end);
 
-			const name = decodeURIComponent(info.match(/(?<=name=")[^"]*/gm)?.[0] ?? '');
-			const fileName = decodeURIComponent(info.match(/(?<=filename=")[^"]*/gm)?.[0] ?? '');
+			const name = safeDecodeUriComponent(info.match(/(?<=name=")[^"]*/gm)?.[0] ?? '');
+			const fileName = safeDecodeUriComponent(info.match(/(?<=filename=")[^"]*/gm)?.[0] ?? '');
 			const contentType = info.match(/(?<=^Content-Type:)[^\n]+/gm)?.[0]?.trim() ?? '';
 
 			if (!name) {
@@ -1225,7 +1243,7 @@ export class Request {
 				(this.#headers?.['cookie'] ?? '')
 					.split(/\s*;\s*/gm)
 					.map(s => s.split(/\s*=\s*/gm))
-					.map(x => [decodeURIComponent(x[0] ?? ''), decodeURIComponent(x[1] ?? '')])
+					.map(x => [safeDecodeUriComponent(x[0] ?? ''), safeDecodeUriComponent(x[1] ?? '')])
 			);
 		}
 
@@ -2464,7 +2482,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 		if (staticFileOrDirectory) {
 			routeHandler = () => {
-				const filePath = decodeURI(path)
+				const filePath = safeDecodeUri(path, staticFileOrDirectory.urlPath)
 					.replace(staticFileOrDirectory.urlPath, staticFileOrDirectory.serverFilePath)
 					.replaceAll('\\', '/')
 					.split('/')
@@ -2528,7 +2546,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 							result = getRouteHandler(fragments, newRoot, methodPath, accumulatedPathParams);
 
 							if (result) {
-								setObjectProperty(accumulatedPathParams, k.replace(/[{}]/gm, ''), decodeURIComponent(fragment));
+								setObjectProperty(accumulatedPathParams, k.replace(/[{}]/gm, ''), safeDecodeUriComponent(fragment));
 								break;
 							}
 						}

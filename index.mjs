@@ -60,7 +60,7 @@ const escapeHtmlMap = {
 	"<": "&lt;",
 	">": "&gt;",
 	'"': "&quot;",
-	"'": "&#39;",
+	"'": "&apos;",
 }
 
 const unescapeHtmlMap = {

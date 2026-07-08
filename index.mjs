@@ -2502,7 +2502,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 					}
 
 					if (handleNotFoundError) {
-						resp.setNotFoundErrorCustomResponseHandler(() => handleNotFoundError(request));
+						resp.setNotFoundErrorCustomResponseHandler(() => handleNotFoundError(request, filePath));
 					}
 
 					if (staticFileOrDirectory.showWholeDirectory) {

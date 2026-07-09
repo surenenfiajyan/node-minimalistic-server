@@ -1724,6 +1724,7 @@ export class FileResponse extends Response {
 	#maxChunkSize = 4 * 1024 * 1024;
 	#maxFragmentSize = 16 * 1024 * 1024 * 1024;
 	#fragmentRequestMap = new WeakMap();
+	#notFoundResponsePromiseMap = new WeakMap();
 	#makeNotFoundResponse = null;
 	#urlPathForDirectory = null;
 
@@ -1745,11 +1746,12 @@ export class FileResponse extends Response {
 		}
 
 		const requestedFragment = await this.#getFragmentRequest(headers);
-		const data = await this.#retreiveData();
 
 		if (requestedFragment) {
 			return 206;
 		}
+
+		const data = await this.#retrieveFinalData(headers);
 
 		return data.code;
 	}
@@ -1761,7 +1763,6 @@ export class FileResponse extends Response {
 		}
 
 		const requestedFragment = await this.#getFragmentRequest(headers);
-		const data = await this.#retreiveData();
 
 		if (requestedFragment) {
 			return {
@@ -1772,6 +1773,8 @@ export class FileResponse extends Response {
 				'Cache-Control': 'no-store, no-cache, must-revalidate',
 			};
 		}
+
+		const data = await this.#retrieveFinalData(headers);
 
 		if (typeof data.body === 'function') {
 			return {
@@ -1789,7 +1792,7 @@ export class FileResponse extends Response {
 		}
 
 		const requestedFragment = await this.#getFragmentRequest(headers);
-		const data = await this.#retreiveData();
+		const data = await this.#retrieveFinalData(headers);
 
 		if (requestedFragment) {
 			return () => data.body(requestedFragment);
@@ -1818,7 +1821,7 @@ export class FileResponse extends Response {
 		this.#dataPromise = this.#proxiedResponse = null;
 	}
 
-	enableFraments() {
+	enableFragments() {
 		this.#enableFragments = true;
 		this.#dataPromise = this.#proxiedResponse = null;
 	}
@@ -1864,7 +1867,7 @@ export class FileResponse extends Response {
 						return x;
 					});
 
-				const data = await this.#retreiveData();
+				const data = await this.#retrieveData();
 
 				if (data.code < 200 || data.code > 299 || typeof data.body !== 'function') {
 					return null;
@@ -1902,7 +1905,7 @@ export class FileResponse extends Response {
 	}
 
 	async * #getDirectoryStream() {
-		const data = await this.#retreiveData();
+		const data = await this.#retrieveData();
 
 		if (typeof data.body !== 'function') {
 			yield data.body;
@@ -1945,7 +1948,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 	}
 
 	async * #getBodyStream(fragmentRequest) {
-		const data = await this.#retreiveData();
+		const data = await this.#retrieveData();
 
 		if (typeof data.body !== 'function') {
 			yield data.body;
@@ -1971,7 +1974,7 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 		}
 	}
 
-	#retreiveData() {
+	#retrieveData() {
 		if (!this.#dataPromise) {
 			this.#dataPromise = new Promise(async resolve => {
 				let filehandle;
@@ -2011,22 +2014,6 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 						})
 					};
 
-					try {
-						const response = await this.#makeNotFoundResponse?.(this.#filePath);
-
-						if (response instanceof Response) {
-							const code = await response.getCode();
-							const headers = await response.getHeaders();
-							const body = await response.getBody();
-
-							notFountData.code = code;
-							notFountData.headers = headers;
-							notFountData.body = body;
-						}
-					} catch (error) {
-						safePrint(error, true);
-					}
-
 					resolve(notFountData);
 				} finally {
 					await filehandle?.close();
@@ -2035,6 +2022,39 @@ ${urlPath ? `<a href="/${parentUrlPath}">Up</a><hr>` : ''}
 		}
 
 		return this.#dataPromise;
+	}
+
+	async #retrieveFinalData(headers = null) {
+		let data = await this.#retrieveData();
+
+		if (headers && data.code === 404 && this.#makeNotFoundResponse) {
+			try {
+				let promise = this.#notFoundResponsePromiseMap.get(headers);
+
+				if (!promise) {
+					promise = this.#makeNotFoundResponse(this.#filePath, headers);
+					this.#notFoundResponsePromiseMap.set(headers, promise);
+				}
+
+				const response = await promise;
+
+				if (response instanceof Response) {
+					const code = await response.getCode();
+					const headers = await response.getHeaders();
+					const body = await response.getBody();
+
+					data = {
+						code,
+						headers,
+						body,
+					}
+				}
+			} catch (error) {
+				safePrint(error, true);
+			}
+		}
+
+		return data;
 	}
 
 	block() {
@@ -2425,6 +2445,7 @@ function wrapInResponseClass(response) {
 }
 
 const staticCache = new Map();
+const headersToRequestsMap = new WeakMap();
 
 export function clearStaticCache(path = null) {
 	invalidateStaticCache(path);
@@ -2473,6 +2494,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 		const path = request.getPath();
 		const pathParams = {};
 		requestHeaders = request.getHeaders();
+		headersToRequestsMap.set(requestHeaders, request);
 		responseBodyIsIncluded = method !== 'HEAD';
 
 		let routeHandler = routes;
@@ -2493,7 +2515,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 
 				if (!resp) {
 					resp = new FileResponse(filePath);
-					resp.enableFraments();
+					resp.enableFragments();
 
 					if (staticFileOrDirectory.maxAgeInSeconds > 0) {
 						resp.addCustomHeaders({
@@ -2502,7 +2524,7 @@ async function handleRequest(req, routes, staticFileDirectories, handleNotFoundE
 					}
 
 					if (handleNotFoundError) {
-						resp.setNotFoundErrorCustomResponseHandler(() => handleNotFoundError(request, filePath));
+						resp.setNotFoundErrorCustomResponseHandler((_, headers) => handleNotFoundError(headersToRequestsMap.get(headers)));
 					}
 
 					if (staticFileOrDirectory.showWholeDirectory) {
